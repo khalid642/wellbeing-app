@@ -1,6 +1,9 @@
 README.md
 pyproject.toml
 setup.py
+tests/test_jamah_gui.py
+tests/test_jamah_store.py
+tests/test_prayer_accuracy.py
 wellbeing_app/__init__.py
 wellbeing_app/constants.py
 wellbeing_app/main.py
@@ -17,6 +20,13 @@ wellbeing_app/gui/application.py
 wellbeing_app/gui/main_window.py
 wellbeing_app/gui/pages/__init__.py
 wellbeing_app/gui/pages/dashboard.py
+wellbeing_app/gui/pages/jamah_settings.py
+wellbeing_app/prayer/__init__.py
+wellbeing_app/prayer/engine.py
+wellbeing_app/prayer/hijri.py
+wellbeing_app/prayer/jamah.py
+wellbeing_app/prayer/location.py
+wellbeing_app/prayer/validator.py
 wellbeing_app/settings/__init__.py
 wellbeing_app/settings/config.py
 wellbeing_app/storage/__init__.py
