@@ -1,0 +1,68 @@
+Phase 11 — Widget Template System
+
+Build the complete widget template management system.
+
+Create wellbeing_app/widgets/__init__.py and wellbeing_app/widgets/template_manager.py
+
+WidgetTemplateManager class:
+  - CRUD operations on widget_templates table
+  - create_template(name, category, widget_type, config_dict) -> int (template_id)
+  - get_template(template_id) -> WidgetTemplate dataclass
+  - update_template(template_id, **kwargs)
+  - delete_template(template_id) (also removes from zikr_steps.widget_ids)
+  - list_templates(category=None, widget_type=None) -> list[WidgetTemplate]
+  - duplicate_template(template_id) -> int (new template_id, name appended with " (copy)")
+  - export_template(template_id, output_path: str) -> str (zip file path)
+  - import_template(zip_path: str) -> int (template_id)
+
+WidgetTemplate dataclass:
+  id: int
+  name: str
+  category: str  # 'spiritual', 'health', 'focus', 'reminders', 'custom'
+  widget_type: str
+  config: dict
+  created_at: datetime
+  preview_image: bytes | None  # Optional screenshot
+
+Widget config schemas (validate on save):
+
+AyahWidget config: { "surah": int, "ayah": int, "show_arabic": bool, "show_translation": bool, "translation": str }
+DuaWidget config: { "arabic": str, "transliteration": str, "translation": str, "source": str }
+AdhkarWidget config: { "text_arabic": str, "translation": str, "count": int, "show_counter": bool }
+TextWidget config: { "text": str, "font_size": int, "align": str, "color": str }
+ImageWidget config: { "file_path": str, "caption": str }
+AudioWidget config: { "file_path": str, "loop": bool, "volume": float }
+BreathingWidget config: { "mode": str, "inhale_seconds": int, "hold_seconds": int, "exhale_seconds": int, "color": str }
+TasbihWidget config: { "target": int, "dhikr_text": str, "size": str }
+ReflectionWidget config: { "prompt_text": str }
+CountdownTimerWidget config: { "duration_seconds": int, "show_ring": bool }
+ClockWidget config: { "show_seconds": bool, "format_24h": bool }
+PrayerInfoWidget config: { "show_prayer_name": bool, "show_time": bool, "show_jamah": bool }
+
+Create seed data: insert 15 default widget templates on first run, covering all widget_type values.
+Include real Arabic text for at least 5 adhkar/dua templates (SubhanAllah, Alhamdulillah, Allahu Akbar, Ayatul Kursi, Surah Al-Fatiha first ayah).
+
+Create wellbeing_app/gui/pages/widget_library.py — WidgetLibraryPage:
+
+Left sidebar: category filter (All, Spiritual, Health, Focus, Reminders, Custom)
+Main area: FlowBox grid of widget cards
+  Each card (160x140px):
+    - Widget type icon
+    - Template name
+    - Category badge
+    - Edit button (pencil icon)
+    - Duplicate button
+    - Delete button (with confirmation dialog)
+
+Toolbar: "New Widget" button + Search entry (filters by name/type in real-time)
+
+Clicking a widget card opens WidgetEditorDialog:
+  - Title: "Edit Widget: [name]"
+  - Name field
+  - Category dropdown
+  - Dynamic config form (fields change based on widget_type)
+  - For AyahWidget: Surah number SpinButton, Ayah number SpinButton, checkboxes
+  - For TextWidget: multiline text entry, font size slider, color picker
+  - For AudioWidget: FileChooserButton
+  - Preview panel on the right: live preview of widget rendered in a small Gtk.Frame
+  - Save / Cancel buttons

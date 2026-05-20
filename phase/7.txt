@@ -1,0 +1,224 @@
+Phase 7 — Eye-Care Overlay & Wellness Widgets
+
+I have the universal OverlayWindow working from Phase 6. Now build the eye-care 
+system and its widgets.
+
+The eye-care system has two parts:
+1. The daemon scheduler that triggers eye-care at intervals
+2. The wellness widgets that display inside the universal overlay
+
+────────────────────────────────────────────
+PART 1 — DAEMON SCHEDULER
+────────────────────────────────────────────
+
+In wellbeing_app/daemon/service.py add EyeCareScheduler:
+
+  Uses GLib.timeout_add_seconds to fire every N minutes (default 20).
+  N is read from app_config table, key 'eyecare_interval_minutes', default 20.
+  Lock duration is read from app_config key 'eyecare_lock_seconds', default 20.
+
+  When the interval fires, call:
+
+    widgets = db.get_overlay_widgets('eyecare')
+    config = OverlayConfig(
+      mode='locked',
+      duration_seconds=eyecare_lock_seconds,
+      widgets=widgets,
+      background_blur=True,
+      password=None,
+      auto_close=False,
+      overlay_id='eyecare'
+    )
+    overlay_manager.show_overlay(config)
+
+  After the overlay emits 'overlay-dismissed':
+    Check HOW it was dismissed via the signal parameter:
+      dismissed_by: str — 'timer_expired_keypress', 'timer_expired_timeout', 'escape'
+    
+    If dismissed_by == 'timer_expired_keypress':
+      → Fire ZIKR_TRIGGER (see below)
+    If dismissed_by == 'timer_expired_timeout' or 'escape':
+      → Do nothing, user returned to work
+
+  Update OverlayWindow to emit 'overlay-dismissed' with dismissed_by string:
+    After lock period ends and user presses key: emit 'timer_expired_keypress'
+    After lock period ends and 5 seconds pass with no keypress: emit 'timer_expired_timeout'
+    User presses Escape (unlocked mode only): emit 'escape'
+
+  ZIKR_TRIGGER:
+    widgets = db.get_overlay_widgets('zikr')
+    config = OverlayConfig(
+      mode='unlocked',
+      duration_seconds=0,
+      widgets=widgets,
+      background_blur=True,
+      password=None,
+      auto_close=False,
+      overlay_id='zikr'
+    )
+    overlay_manager.show_overlay(config)
+
+  Do NOT fire ZIKR_TRIGGER if another overlay is already active.
+
+  Pause eye-care when salah lock overlay is active:
+    In OverlayManager, track active overlay_id.
+    EyeCareScheduler checks overlay_manager.is_overlay_active() before firing.
+    If active: skip this interval (do not queue).
+    Reschedule normally for next interval.
+
+────────────────────────────────────────────
+PART 2 — WELLNESS WIDGETS
+────────────────────────────────────────────
+
+Create these widget classes in wellbeing_app/overlay_engine/widgets/
+
+All widgets must:
+  - Inherit from Gtk.Box
+  - Implement load_config(config: dict)
+  - Implement start_animations()
+  - Implement stop_animations()
+  - Be fully self-contained
+
+──────────────────────
+breathing_widget.py
+──────────────────────
+BreathingWidget(Gtk.Box)
+
+Uses Gtk.DrawingArea with Cairo for the animated circle.
+Animation runs via GLib.timeout_add(16, redraw_callback) for ~60fps.
+
+Phases (driven by config):
+  default mode 'box': inhale 4s, hold 4s, exhale 4s, hold 4s
+  mode '4-7-8': inhale 4s, hold 7s, exhale 8s
+  Configurable via config keys: mode, inhale_seconds, hold_seconds, exhale_seconds
+
+Visual:
+  Outer ring: thin circle, soft teal color (use hardcoded rgba(80,200,180,0.3))
+  Inner circle: fills from small to large during inhale, shrinks during exhale
+  Interpolation: use sine easing for smooth expansion (math.sin(t * math.pi / 2))
+  Center text: current phase name ("Breathe in", "Hold", "Breathe out")
+  Below circle: countdown "3s" updating each second
+  Glow: outer ring opacity pulses between 0.2 and 0.6 in sync with breathing
+
+Config dict keys:
+  mode: str ('box' or '4-7-8')
+  inhale_seconds: int
+  hold_seconds: int
+  exhale_seconds: int
+
+──────────────────────
+text_widget.py
+──────────────────────
+TextWidget(Gtk.Box)
+
+Displays text with configurable style.
+
+Config dict keys:
+  text: str (supports \n for line breaks)
+  font_size: int (default 18)
+  align: str ('left', 'center', 'right')
+  bold: bool
+  color: str (hex color, default '#ffffff')
+
+Implementation:
+  Gtk.Label with wrap=True, use Pango markup for font size/weight/color
+  Center the label in the box
+
+──────────────────────
+clock_widget.py
+──────────────────────
+ClockWidget(Gtk.Box)
+
+Shows current time, updates every second via GLib.timeout_add_seconds(1, ...).
+
+Config dict keys:
+  show_seconds: bool (default True)
+  format_24h: bool (default True)
+  font_size: int (default 48)
+
+──────────────────────
+countdown_timer_widget.py
+──────────────────────
+CountdownTimerWidget(Gtk.Box)
+
+Circular progress ring + MM:SS text in center.
+Uses Gtk.DrawingArea with Cairo.
+Ring draws arc from top, shrinking as time passes.
+Colors: remaining = rgba(255,255,255,0.7), elapsed = rgba(255,255,255,0.15)
+
+Config dict keys:
+  duration_seconds: int
+  show_ring: bool (default True)
+  font_size: int (default 32)
+
+Method: start_countdown(seconds: int) — called by OverlayWindow when it starts
+
+──────────────────────
+tasbih_widget.py
+──────────────────────
+TasbihWidget(Gtk.Box)
+
+Large number display. Increments on click or any key press.
+
+Config dict keys:
+  target: int (default 33)
+  dhikr_text: str (e.g. 'سبحان الله')
+  size: str ('small', 'medium', 'large')
+
+Visual:
+  dhikr_text centered top (Arabic font if available)
+  Current count as very large number (font size 72)
+  "/ target" in smaller text below count
+  When count reaches target: flash green, play soft click sound if audio enabled
+  Reset button (small, bottom right)
+
+──────────────────────
+prayer_info_widget.py
+──────────────────────
+PrayerInfoWidget(Gtk.Box)
+
+Shows current prayer info pulled from PrayerEngine.
+
+Config dict keys:
+  show_prayer_name: bool
+  show_time: bool
+  show_jamah: bool
+  font_size: int (default 24)
+
+────────────────────────────────────────────
+PART 3 — DEFAULT WIDGET ASSIGNMENTS
+────────────────────────────────────────────
+
+Insert default overlay_widget_assignments rows if none exist for 'eyecare' slot:
+
+  order 1: text_widget — "Rest your eyes. Look 20 feet away."
+  order 2: breathing_widget — box breathing mode
+  order 3: text_widget — "Blink slowly 5 times. Relax your shoulders."
+
+Insert default rows for 'zikr' slot:
+  order 1: tasbih_widget — SubhanAllah, target 33
+  order 2: text_widget — "سبحان الله وبحمده" with translation below
+
+These defaults give a working experience on first launch.
+
+────────────────────────────────────────────
+PART 4 — SETTINGS
+────────────────────────────────────────────
+
+Create wellbeing_app/gui/pages/eyecare_settings.py — EyeCareSettingsPage:
+
+  Eye-care interval: SpinButton (1–120 minutes, default 20)
+  Lock duration: SpinButton (5–300 seconds, default 20)
+  Enable/disable toggle
+
+  Section: "Eye-care Widgets"
+    Ordered list (Gtk.ListBox) showing current widget assignments for 'eyecare' slot
+    Each row: widget type icon, widget name, drag handle to reorder, remove button
+    "Add Widget" button → opens widget picker dialog showing all widget_templates
+    Reorder via drag-and-drop, saves display_order to DB immediately
+
+  Section: "Zikr Widgets" (same structure, for 'zikr' slot)
+    Same add/reorder/remove UI
+
+  "Test Eye-care Overlay" button → immediately triggers the eyecare overlay
+  "Test Zikr Overlay" button → immediately triggers the zikr overlay

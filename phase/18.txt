@@ -1,0 +1,69 @@
+Phase 18 — Plugin System
+
+Build the plugin system for extensible widget types.
+
+Create wellbeing_app/plugins/__init__.py and wellbeing_app/plugins/manager.py
+
+PluginManager class:
+
+Plugin directory: ~/.config/wellbeing-app/plugins/
+Each plugin is a subdirectory: ~/.config/wellbeing-app/plugins/my-widget/
+  plugin.json: { name, description, version, author, widget_types: [...], entry: "main.py" }
+  main.py: Python file with plugin implementation
+
+Plugin API:
+
+Create wellbeing_app/plugins/api.py — the public API plugins import:
+
+  class WidgetPlugin(ABC):
+    @property
+    @abstractmethod
+    def widget_type_id(self) -> str:  # e.g. "com.example.weather"
+    
+    @property
+    @abstractmethod
+    def display_name(self) -> str:
+    
+    @property
+    @abstractmethod
+    def default_config(self) -> dict:
+    
+    @abstractmethod
+    def create_widget(self, config: dict) -> Gtk.Widget:
+      """Return a Gtk.Widget that displays this widget's content"""
+    
+    @abstractmethod
+    def create_config_editor(self, config: dict, on_change: Callable) -> Gtk.Widget:
+      """Return a Gtk.Widget for editing this widget's config in the overlay designer"""
+
+PluginManager.load_plugins():
+  - Scans plugin directory
+  - Imports each plugin's main.py in a sandboxed manner (using importlib)
+  - Registers each WidgetPlugin subclass found
+  - Handles import errors gracefully (log error, skip plugin, never crash)
+
+PluginManager.get_widget_plugin(widget_type_id: str) -> WidgetPlugin | None
+
+Integrate plugins into widget_renderer.py:
+  When rendering a widget whose type is not built-in:
+    Look up widget_type in PluginManager
+    If found: call plugin.create_widget(config)
+    If not found: show error placeholder widget
+
+Create wellbeing_app/gui/pages/plugin_manager.py — PluginManagerPage:
+  List of installed plugins (name, version, author, widget types, enabled toggle)
+  "Open Plugins Folder" button (opens ~/.config/wellbeing-app/plugins/ in file manager)
+  "Reload Plugins" button
+  For each plugin: "Disable" toggle, "Remove" button (deletes directory with confirmation)
+  Plugin detail expander: shows description, provided widget types, any load errors
+
+Create an example plugin in examples/weather-widget/:
+  plugin.json: weather widget
+  main.py: WeatherPlugin(WidgetPlugin) that displays temperature + weather icon
+  Uses wttr.in JSON API (no API key needed: curl wttr.in/London?format=j1)
+  This example shows plugin developers exactly how to build a plugin.
+
+Document the plugin API in a PLUGINS.md file with:
+  Full API reference
+  Example plugin walkthrough
+  How to distribute as a .wbpkg file

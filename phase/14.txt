@@ -1,0 +1,77 @@
+Phase 14 — Theme Engine
+
+Build the complete CSS-based theme engine.
+
+Create wellbeing_app/themes/__init__.py and wellbeing_app/themes/engine.py
+
+ThemeEngine class:
+  apply_theme(theme_config: dict)
+  load_theme_from_db(theme_id: int)
+  save_current_as_theme(name: str) -> int
+  export_theme(theme_id: int, output_path: str) -> str
+  import_theme(zip_path: str) -> int
+  get_active_theme() -> dict
+  list_themes() -> list[ThemeConfig]
+
+ThemeConfig dataclass:
+  id: int
+  name: str
+  is_active: bool
+  mode: str              # 'light', 'dark', 'amoled'
+  accent_color: str      # hex color
+  blur_intensity: float  # 0.0 to 1.0
+  transparency_level: float  # 0.0 to 1.0
+  font_family: str       # system font name
+  animation_speed: float # 0.5=slow, 1.0=normal, 2.0=fast
+  custom_css: str        # user's own CSS appended at end
+  wallpaper_path: str    # optional
+
+Generate CSS dynamically from ThemeConfig:
+  The engine builds a CSS string and applies it via Gtk.CssProvider.load_from_data()
+
+CSS must define these variables (as :root or window-level CSS custom properties via GTK CSS):
+  @define-color accent_color {accent_color};
+  @define-color glass_bg rgba({r},{g},{b},{transparency_level * 0.12});
+  @define-color glass_border rgba(255,255,255,{transparency_level * 0.25});
+
+CSS classes generated dynamically:
+  .glass-card: background-color uses @glass_bg, border uses @glass_border, border-radius 16px
+  .overlay-bg: background for fullscreen overlays
+  .prayer-card: individual prayer time cards
+  .prayer-card.current: highlighted state for active prayer
+  .countdown-ring: styling for the SVG-like countdown ring
+  .widget-container: base for all overlay widgets
+  transition durations scale with animation_speed (200ms / speed)
+
+Built-in themes to create in database on first run:
+  1. "Midnight Blue" — dark, blue accent, high transparency
+  2. "Forest Green" — dark, green accent, medium transparency
+  3. "Desert Sand" — light, amber accent, low transparency
+  4. "Pure Dark" — AMOLED black, white accent
+  5. "Sunrise" — light, orange accent, medium transparency
+
+Create wellbeing_app/gui/pages/theme_settings.py — ThemeSettingsPage:
+
+Left panel: theme list with preview thumbnails (generated as small colored gradients)
+  - Each theme card: name, mode badge, color swatch
+  - "Apply" button, "Edit" button, "Export" button, "Delete" button (cannot delete active)
+  - "Import Theme" button at bottom
+  - "New Theme" button
+
+Right panel: theme editor (for selected theme)
+  Mode selector: Light / Dark / AMOLED (toggle buttons row)
+  Accent color: color swatch button → opens Gtk.ColorChooserDialog
+  Blur intensity: horizontal slider (0-100%, label updates live)
+  Transparency: horizontal slider (0-100%)
+  Font family: entry field with "Browse" button opening font picker
+  Animation speed: segmented button (Slow / Normal / Fast)
+  Custom CSS: AdwExpanderRow containing a Gtk.TextView with monospace font
+  Live preview section at bottom: small mock card showing current theme applied
+
+AMOLED mode specifics:
+  - background: #000000 (pure black)
+  - All cards: #0a0a0a or #0d0d0d
+  - Text: pure white
+  - Accent glow effect: subtle box-shadow in accent color
+
+Apply theme immediately as user adjusts sliders (debounced 300ms).

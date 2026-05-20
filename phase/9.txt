@@ -1,0 +1,260 @@
+Phase 9 — Zikr Widget Types
+
+I have the universal OverlayWindow and eye-care widgets working. Now build the 
+spiritual widget types used in the Zikr overlay (and also usable in any overlay slot).
+
+The zikr overlay is already triggered by the daemon after eye-care dismissal (Phase 7).
+It uses OverlayWindow in unlocked mode with widgets from the 'zikr' slot.
+
+This phase adds the spiritual widget types and the zikr sequence engine.
+
+────────────────────────────────────────────
+PART 1 — SPIRITUAL WIDGET TYPES
+────────────────────────────────────────────
+
+Create these in wellbeing_app/overlay_engine/widgets/
+
+All follow same pattern as Phase 7 widgets:
+  inherit Gtk.Box, implement load_config, start_animations, stop_animations
+
+──────────────────────
+ayah_widget.py
+──────────────────────
+AyahWidget(Gtk.Box)
+
+Displays a Quran verse.
+
+Config dict keys:
+  surah: int
+  ayah: int
+  show_arabic: bool (default True)
+  show_translation: bool (default True)
+  translation_language: str (default 'en')
+
+Data source: load from data/quran/quran_simple.json
+JSON structure:
+  {
+    "1": {
+      "name": "Al-Fatiha",
+      "verses": {
+        "1": { "arabic": "بِسْمِ اللَّهِ...", "en": "In the name of Allah..." },
+        ...
+      }
+    }
+  }
+
+Create this JSON file with at minimum:
+  Surah 1 (Al-Fatiha) all 7 ayahs
+  Surah 112 (Al-Ikhlas) all 4 ayahs
+  Surah 113 (Al-Falaq) all 5 ayahs
+  Surah 114 (An-Nas) all 6 ayahs
+
+Visual layout (top to bottom):
+  Surah name (small, centered, muted color)
+  Arabic text (large, right-aligned, Arabic font)
+  Translation text (medium, centered, slightly muted)
+  Reference "Surah X : Ayah Y" (small, bottom right)
+
+Arabic font: check if 'Amiri', 'Scheherazade New', or 'Noto Naskh Arabic' is installed
+via Pango. Use first available. Fallback to system default.
+
+──────────────────────
+dua_widget.py
+──────────────────────
+DuaWidget(Gtk.Box)
+
+Config dict keys:
+  arabic: str
+  transliteration: str
+  translation: str
+  source: str (e.g. "Sahih Bukhari 6406")
+
+Visual layout (top to bottom):
+  Arabic text (large, right-aligned, Arabic font)
+  Transliteration (medium, italic, centered)
+  Translation (medium, centered)
+  Source (small, bottom, muted)
+
+──────────────────────
+adhkar_widget.py
+──────────────────────
+AdhkarWidget(Gtk.Box)
+
+Like DuaWidget but includes optional tasbih counter.
+
+Config dict keys:
+  text_arabic: str
+  translation: str
+  count: int (target repetitions)
+  show_counter: bool
+
+If show_counter is True:
+  Embed a small TasbihWidget below the text
+  Share the same config.count as the tasbih target
+
+──────────────────────
+image_widget.py
+──────────────────────
+ImageWidget(Gtk.Box)
+
+Config dict keys:
+  file_path: str (absolute path to image file)
+  caption: str
+  fit_mode: str ('contain', 'cover')
+
+Load image using GdkPixbuf.Pixbuf.new_from_file_at_scale()
+Display in a Gtk.Picture
+Show caption below if not empty
+If file_path is missing or unreadable: show placeholder text "Image not found"
+
+──────────────────────
+audio_widget.py
+──────────────────────
+AudioWidget(Gtk.Box)
+
+Plays audio when this widget is visible. Stops when widget is removed.
+
+Config dict keys:
+  file_path: str
+  loop: bool
+  volume: float (0.0–1.0)
+
+On start_animations(): call AudioEngine.play_ambient(file_path, loop, volume)
+On stop_animations(): call AudioEngine.stop_ambient()
+
+Visual: simple decorative waveform placeholder (3 static vertical bars, animated
+height via CSS keyframes, teal color). Shows filename below.
+
+──────────────────────
+reflection_widget.py
+──────────────────────
+ReflectionWidget(Gtk.Box)
+
+Config dict keys:
+  prompt_text: str
+
+Large centered text. Decorative thin border around the card.
+Intended for prompts like "What are you grateful for today?"
+
+────────────────────────────────────────────
+PART 2 — ZIKR SEQUENCE ENGINE
+────────────────────────────────────────────
+
+Create wellbeing_app/overlay_engine/sequence_player.py — ZikrSequencePlayer
+
+This handles showing multiple zikr widgets one after another inside ONE 
+OverlayWindow instance.
+
+How it works:
+  OverlayWindow receives widgets list normally from overlay_widget_assignments.
+  When a ZikrSequence is assigned to the 'zikr' slot instead of individual widgets,
+  the ZikrSequencePlayer takes over widget display inside the overlay card.
+
+ZikrSequencePlayer(card_container: Gtk.Box):
+  Takes the overlay's inner card Gtk.Box as container.
+  
+  load_sequence(sequence_id: int):
+    Loads zikr_sequences + zikr_steps from DB
+
+  play():
+    Iterates steps in step_order.
+    For each step: select widgets per selection_mode, display them, wait duration, advance.
+
+  Step selection modes:
+    'fixed': use all widget_ids in step.widget_ids (JSON list of template IDs)
+    'random_one': pick 1 randomly from widget_ids list
+    'random_n': pick step.n_count randomly from widget_ids list
+
+  Step display:
+    Clear card_container content.
+    Create widget instances for selected templates.
+    Add to card_container.
+    Call start_animations() on each.
+    After step.duration_seconds: call stop_animations(), transition to next step.
+
+  Transitions between steps (step.transition field):
+    'fade': set card_container opacity 1→0 over 300ms, swap content, 0→1 over 300ms
+    'instant': swap content immediately
+
+  Loop modes (sequence.loop_mode):
+    'once': play all steps, then emit 'sequence_complete'
+    'loop': after last step, restart from step 1
+
+  'sequence_complete' signal: OverlayWindow listens and calls self.destroy()
+
+  Step indicator: at bottom of card, show dots (● ● ○ ○) for current/total steps.
+  Update dot display on each step advance.
+
+Integration:
+  In overlay_widget_assignments, a slot can have either:
+    A) Individual widget_template rows (existing system) — shown all at once stacked
+    B) A single row with widget_type='zikr_sequence' and config_json containing
+       { "sequence_id": 3 } — triggers ZikrSequencePlayer
+
+  OverlayWindow.load_widgets() checks: if any widget is type 'zikr_sequence':
+    Instantiate ZikrSequencePlayer and pass card_container to it.
+  Otherwise: use existing stacked widget display.
+
+────────────────────────────────────────────
+PART 3 — DEFAULT DATA
+────────────────────────────────────────────
+
+Insert into zikr_sequences:
+  Name: "Evening Remembrance", loop_mode: 'once'
+  
+  Steps:
+    Step 1: fixed, widget=adhkar_widget(SubhanAllah x33), duration=60s, transition='fade'
+    Step 2: fixed, widget=adhkar_widget(Alhamdulillah x33), duration=60s, transition='fade'
+    Step 3: fixed, widget=adhkar_widget(AllahuAkbar x33), duration=60s, transition='fade'
+    Step 4: fixed, widget=ayah_widget(surah=112, ayah=1), duration=30s, transition='fade'
+
+Insert into widget_templates the adhkar entries with real Arabic text:
+  SubhanAllah: arabic='سبحان الله', translation='Glory be to Allah', count=33
+  Alhamdulillah: arabic='الحمد لله', translation='Praise be to Allah', count=33
+  AllahuAkbar: arabic='الله أكبر', translation='Allah is the Greatest', count=33
+
+Update 'zikr' slot in overlay_widget_assignments:
+  Replace the simple tasbih/text widgets with:
+  A single row: widget_type='zikr_sequence', config_json='{"sequence_id": 1}'
+
+────────────────────────────────────────────
+PART 4 — SEQUENCE EDITOR GUI
+────────────────────────────────────────────
+
+Create wellbeing_app/gui/pages/zikr_editor.py — ZikrEditorPage
+
+Add "Zikr" to sidebar navigation.
+
+Left panel: list of saved sequences
+  Each row: sequence name, step count, loop mode badge
+  "New Sequence" button at bottom
+  Delete button per row (with confirmation)
+
+Right panel (when sequence selected):
+  Sequence name: editable Gtk.Entry at top
+  Loop mode: DropDown (Once / Loop)
+
+  Steps list (Gtk.ListBox):
+    Each step shown as a row:
+      Step number label
+      Selection mode badge (Fixed / Random 1 / Random N)
+      Duration label (e.g. "60s")
+      Expand arrow button
+
+    Expanded step editor (inside AdwExpanderRow):
+      Selection mode: DropDown (Fixed / Random One / Random N)
+      N count: SpinButton (visible only if Random N selected)
+      Widget picker: list of checkboxes, one per widget_template
+        Show: type icon, template name, category
+        Checked = included in this step's pool
+      Duration: SpinButton (seconds, 1–3600)
+      Transition: DropDown (Fade / Instant)
+
+    "Add Step" button below list
+    Drag handle on each row for reorder (Gtk.DragSource + Gtk.DropTarget)
+
+  "Preview Sequence" button:
+    Immediately shows OverlayWindow in unlocked mode with ZikrSequencePlayer
+    loaded with the currently edited sequence (saves first)
+
+Save all changes to DB immediately on any field change (no explicit Save button).

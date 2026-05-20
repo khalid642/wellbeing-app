@@ -1,0 +1,79 @@
+Phase 19 — Watchdog, Crash Recovery & Polish
+
+Build reliability systems and polish the entire app.
+
+WATCHDOG SYSTEM:
+
+Enhance wellbeing_app/daemon/watchdog.py:
+
+WatchdogService:
+  Runs in the same GLib main loop as the daemon (no separate thread)
+  Checks every 60 seconds:
+    - Were any GLib timers fired in the last 5 minutes? (track via last_event_time timestamp)
+    - Is the prayer engine returning valid times? (quick sanity check)
+    - Is the audio engine in a valid state?
+    - Are all scheduled events still registered?
+  
+  If main loop appears stalled (checked via GLib.idle_add heartbeat):
+    Log CRITICAL warning
+    Attempt daemon restart: reload config, recalculate schedule, reregister timers
+  
+  Safe mode: if 3 consecutive restarts fail, enter SAFE_MODE:
+    Disable all overlays
+    Only play adhan (no lock screens)
+    Show desktop notification: "Wellbeing App entered safe mode"
+    Log reason
+
+CRASH RECOVERY:
+
+Create wellbeing_app/utils/recovery.py:
+
+On app start, check ~/.local/state/wellbeing-app/crash_state.json:
+  If file exists: last session crashed without clean exit
+  Show non-intrusive in-app notification: "App recovered from unexpected exit"
+  Offer: "View Logs" button
+
+On clean exit: delete crash_state.json
+On app start: write crash_state.json with timestamp + pid
+
+Config backup rotation:
+  Before any config write, create a backup in ~/.config/wellbeing-app/backups/auto/
+  Keep last 10 auto-backups
+  If config read fails (corruption): auto-restore from most recent backup
+  Log restoration event
+
+PERFORMANCE OPTIMIZATION:
+
+Review and optimize:
+  Prayer engine caching: cache today's schedule, invalidate at midnight. Never recalculate on every UI refresh.
+  Widget renderer: implement widget reuse pool (don't recreate Gtk widgets from scratch on every overlay show)
+  Database: add indexes on frequently queried columns (overlays.type, widget_templates.category, reminders.enabled)
+  Ensure daemon memory usage stays under 50MB at idle (profile with tracemalloc, log if exceeded)
+
+FINAL POLISH:
+
+Animations:
+  Review all Gtk.Stack transitions — ensure they use SLIDE_LEFT_RIGHT consistently
+  Overlay fade-in: ensure it's exactly 400ms, using GLib.timeout_add(16, ...) steps
+  Prayer card "current" highlight: add a subtle animated left border using CSS animation @keyframes
+
+i3wm-specific polish:
+  If WM_CLASS or app_id is not being set correctly for i3 window rules, fix it
+  Ensure the app doesn't steal focus when launching overlays from the daemon
+  Ensure float rules work: the settings window should be tiled; overlays should float (layer-shell handles this automatically on Wayland)
+
+Error handling review:
+  All SQLite operations: wrap in try/except, log errors, never crash
+  All GStreamer operations: handle GST_MESSAGE_ERROR, log and fall back gracefully
+  All file operations: handle FileNotFoundError, PermissionError gracefully
+  All network operations (location detection, future weather plugin): timeout + fallback
+
+Write final integration test (tests/test_full_flow.py):
+  - Starts daemon
+  - Simulates prayer time firing (by manually calling the event callback)
+  - Verifies adhan would be triggered
+  - Simulates iqamah firing
+  - Verifies lock overlay launches after 30 seconds (mock the 30s delay to 0.1s for testing)
+  - Verifies eye-care fires at correct interval
+  - Exits cleanly
+  - Verifies crash_state.json was deleted

@@ -1,0 +1,263 @@
+Phase 6 — Universal Overlay System
+
+Build the single universal overlay window. This one window handles ALL overlay
+use cases by loading different widget sets.
+
+Create wellbeing_app/overlay_engine/__init__.py
+Create wellbeing_app/overlay_engine/overlay_window.py
+Create wellbeing_app/overlay_engine/overlay_manager.py
+
+────────────────────────────────────────────
+DATACLASSES
+────────────────────────────────────────────
+
+In overlay_window.py define these at the top:
+
+from dataclasses import dataclass, field
+from gi.repository import GObject
+
+@dataclass
+class WidgetConfig:
+  template_id: int
+  widget_type: str
+  config: dict
+  display_order: int = 0
+
+@dataclass
+class OverlayConfig:
+  mode: str                  # 'locked' or 'unlocked'
+  duration_seconds: int      # lock duration or auto-close duration
+  widgets: list              # list[WidgetConfig]
+  overlay_id: str            # 'salah_lock', 'eyecare', 'zikr', 'reminder_{id}'
+  background_blur: bool = True
+  password: str | None = None
+  auto_close: bool = False
+
+────────────────────────────────────────────
+DATABASE HELPER — add to storage/database.py
+────────────────────────────────────────────
+
+Also add overlay_widget_assignments table creation to database.py
+(since Phase 6 is where this table is introduced):
+
+  CREATE TABLE IF NOT EXISTS overlay_widget_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    overlay_slot TEXT NOT NULL,
+    widget_template_id INTEGER REFERENCES widget_templates(id),
+    display_order INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1
+  );
+
+Add this method to the Database class in storage/database.py:
+
+  def get_overlay_widgets(self, slot: str) -> list:
+    import json
+    rows = self.conn.execute('''
+      SELECT wt.id, wt.widget_type, wt.config_json, owa.display_order
+      FROM overlay_widget_assignments owa
+      JOIN widget_templates wt ON wt.id = owa.widget_template_id
+      WHERE owa.overlay_slot = ? AND owa.enabled = 1
+      ORDER BY owa.display_order ASC
+    ''', (slot,)).fetchall()
+
+    return [
+      WidgetConfig(
+        template_id=row[0],
+        widget_type=row[1],
+        config=json.loads(row[2] or '{}'),
+        display_order=row[3]
+      )
+      for row in rows
+    ]
+
+────────────────────────────────────────────
+OverlayWindow class
+────────────────────────────────────────────
+
+class OverlayWindow(Gtk.Window, GObject.GObject):
+
+  __gsignals__ = {
+    'overlay-dismissed': (
+      GObject.SignalFlags.RUN_FIRST,
+      None,
+      (str,)
+    )
+  }
+
+  Dismissed reasons (always pass one of these strings to emit):
+    'timer_expired_keypress'   → lock ended, user pressed key
+    'timer_expired_timeout'    → lock ended, user did nothing for 5s
+    'escape'                   → user dismissed unlocked overlay
+    'password_accepted'        → correct password entered
+
+  def __init__(self, config: OverlayConfig):
+    ...
+
+  def _dismiss(self, reason: str):
+    self.emit('overlay-dismissed', reason)
+    self.destroy()
+
+Window setup:
+  - Gtk.Window (NOT AdwWindow)
+  - Fullscreen on correct monitor
+  - Always on top
+
+  Wayland (check using os.environ.get('WAYLAND_DISPLAY')):
+    from gi.repository import GtkLayerShell
+    GtkLayerShell.init_for_window(self)
+    GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+    GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+    GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+    GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+    GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
+    GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+
+  X11 fallback:
+    self.set_keep_above(True)
+    self.fullscreen()
+
+  No decorations: self.set_decorated(False)
+
+Visual design:
+  Background: dark semi-transparent (rgba 0,0,0,0.72)
+  Center card: glassmorphism rounded rect
+    CSS class 'overlay-card':
+      background-color: alpha(white, 0.08);
+      border: 1px solid alpha(white, 0.18);
+      border-radius: 24px;
+      padding: 32px;
+  Fade-in: opacity 0→1 over 400ms using GLib.timeout_add(16, step)
+
+LOCKED mode behavior:
+  Phase 1 (locked, 0 to duration_seconds):
+    Key events do nothing (controller connected but ignored)
+    Show countdown timer
+    If password set: show PIN entry (always visible), Enter checks password
+  
+  Phase 2 (unlockable, after timer):
+    Show 'Press Enter or Space to continue'
+    Enter / Space → self._dismiss('timer_expired_keypress')
+    If no key in 5 seconds → self._dismiss('timer_expired_timeout')
+    If password: Enter checks PIN,
+      correct → self._dismiss('password_accepted')
+
+UNLOCKED mode behavior:
+  NOT keyboard-grabbing (no EXCLUSIVE keyboard mode on layer shell)
+  Escape / Space / Enter → self._dismiss('escape')
+  If auto_close=True: after duration_seconds → self._dismiss('timer_expired_timeout')
+
+Widget loading — load_widgets():
+  Iterates config.widgets (list[WidgetConfig])
+  For each WidgetConfig: calls WidgetRenderer.create_widget(wc)
+  Stacks resulting Gtk.Widget instances vertically in card with 16px spacing
+  If any widget has widget_type == 'zikr_sequence':
+    Use ZikrSequencePlayer instead of stacking (Phase 9 implements this)
+
+Create wellbeing_app/overlay_engine/widget_renderer.py — WidgetRenderer:
+
+  @staticmethod
+  def create_widget(wc: WidgetConfig) -> Gtk.Widget:
+    Dispatches on wc.widget_type string.
+    Returns appropriate widget instance.
+    Initially handles: 'text_widget', 'clock_widget', 'countdown_timer_widget'
+    For unknown types: return Gtk.Label(label=f'[{wc.widget_type}]')
+    Phase 7 adds: breathing, tasbih, prayer_info
+    Phase 9 adds: ayah, dua, adhkar, image, audio, reflection
+
+────────────────────────────────────────────
+OverlayManager
+────────────────────────────────────────────
+
+Create wellbeing_app/overlay_engine/overlay_manager.py
+
+class OverlayManager:
+  _instance = None
+
+  @classmethod
+  def get(cls):
+    if cls._instance is None:
+      cls._instance = OverlayManager()
+    return cls._instance
+
+  def __init__(self):
+    self._current: OverlayWindow | None = None
+    self._queue: list[OverlayConfig] = []
+    self._callbacks: list = []
+
+  def show_overlay(self, config: OverlayConfig):
+    if self._current is not None:
+      self._queue.append(config)
+      return
+    self._show(config)
+
+  def _show(self, config: OverlayConfig):
+    win = OverlayWindow(config)
+    win.connect('overlay-dismissed', self._on_dismissed)
+    self._current = win
+    win.present()
+
+  def _on_dismissed(self, window, dismissed_by: str):
+    config = self._current.config if self._current else None
+    self._current = None
+    for cb in self._callbacks:
+      cb(config, dismissed_by)
+    if self._queue:
+      next_config = self._queue.pop(0)
+      self._show(next_config)
+
+  def on_dismissed(self, callback):
+    self._callbacks.append(callback)
+
+  def dismiss_current(self):
+    if self._current:
+      self._current._dismiss('escape')
+
+  def is_overlay_active(self) -> bool:
+    return self._current is not None
+
+────────────────────────────────────────────
+DAEMON INTEGRATION
+────────────────────────────────────────────
+
+Connect daemon events to OverlayManager in daemon/service.py:
+
+  overlay_manager = OverlayManager.get()
+  overlay_manager.on_dismissed(self._on_overlay_dismissed)
+
+  def _on_overlay_dismissed(self, config, dismissed_by: str):
+    if config and config.overlay_id == 'eyecare':
+      if dismissed_by == 'timer_expired_keypress':
+        self._fire_zikr_overlay()
+
+  def _fire_lock_overlay(self, prayer_name: str):
+    widgets = db.get_overlay_widgets('salah_lock')
+    config = OverlayConfig(
+      mode='locked',
+      duration_seconds=int(db.get_config('salah_lock_duration_seconds', 900)),
+      widgets=widgets,
+      overlay_id='salah_lock'
+    )
+    overlay_manager.show_overlay(config)
+
+  def _fire_zikr_overlay(self):
+    if overlay_manager.is_overlay_active():
+      return
+    widgets = db.get_overlay_widgets('zikr')
+    config = OverlayConfig(
+      mode='unlocked',
+      duration_seconds=0,
+      widgets=widgets,
+      overlay_id='zikr'
+    )
+    overlay_manager.show_overlay(config)
+
+────────────────────────────────────────────
+TEST
+────────────────────────────────────────────
+
+Create tests/test_overlay.py:
+  Test 1: show locked overlay for 5 seconds, enter unlockable phase, press Space
+  Test 2: show unlocked overlay, press Escape immediately
+  Use dummy WidgetConfig with widget_type='text_widget'
+  Confirm dismissed_by string is correct in both tests
+  Confirm works on Wayland and X11

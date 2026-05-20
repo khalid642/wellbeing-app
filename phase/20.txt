@@ -1,0 +1,76 @@
+Phase 20 — Packaging & Final Deliverables
+
+Finalize packaging and create all deliverables for Fedora/RPM distribution.
+
+Create the complete packaging setup:
+
+pyproject.toml — finalize:
+  [build-system]: setuptools >= 68
+  [project]: name="wellbeing-app", version="1.0.0", requires-python=">=3.13"
+  dependencies list: PyGObject, adhanpy, hijri-converter (or hijridate), and any other used packages
+  [project.scripts]: wellbeing-app = "wellbeing_app.main:main"
+  [project.gui-scripts]: wellbeing-app-gui = "wellbeing_app.main:main_gui"
+  [tool.setuptools.package-data]: include data/*, systemd/*, data/audio/, data/quran/
+
+setup.cfg or MANIFEST.in: include all non-Python files
+
+Create packaging/wellbeing-app.spec — RPM spec file:
+  Name: wellbeing-app
+  Version: 1.0.0
+  BuildRequires: python3-devel, python3-gobject-devel, gtk4-devel, libadwaita-devel
+  Requires: python3-gobject, gtk4, libadwaita, gstreamer1-plugins-base, gstreamer1-plugins-good, gtk4-layer-shell, python3-pip
+  %install: standard Python package install to /usr/lib/python3/site-packages/ + install .desktop to /usr/share/applications/ + icon to /usr/share/icons/hicolor/scalable/apps/
+  %post: systemctl --user daemon-reload (if using systemd)
+  Provides clean %files section
+
+Create install.sh — convenience installer for development:
+  Checks Fedora (reads /etc/os-release)
+  Installs system dependencies: sudo dnf install -y python3-gobject python3-gobject-devel gtk4 libadwaita gstreamer1-plugins-base gstreamer1-plugins-good gtk4-layer-shell python3-pip libappindicator-gtk3 libnotify
+  pip install --user -e . (editable install)
+  Installs systemd service: cp systemd/wellbeing-app.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+  Installs desktop entry: cp data/wellbeing-app.desktop ~/.local/share/applications/
+  Prints: "Installation complete. Run: wellbeing-app"
+
+Create uninstall.sh:
+  Stops and disables systemd service
+  Removes installed files
+  Optionally removes config (asks user)
+
+Update README.md — comprehensive:
+  Introduction and feature overview
+  Screenshots section (placeholder)
+  Installation (Fedora/i3wm focus)
+  i3wm configuration (suggested i3 config snippets)
+  Audio files setup (where to place adhan MP3s)
+  Plugin development guide link
+  Keyboard shortcuts reference
+  DBus API reference
+  Troubleshooting section:
+    "Overlay not showing on Wayland" → check gtk4-layer-shell installed
+    "No audio" → check GStreamer plugins, test with test_audio script
+    "Prayer times wrong" → check coordinates and timezone in settings
+    "App crashes on start" → check logs in ~/.local/state/wellbeing-app/
+
+Create data/wellbeing-app.desktop:
+  [Desktop Entry]
+  Name=Wellbeing App
+  Comment=Islamic Digital Wellbeing Companion
+  Exec=wellbeing-app
+  Icon=wellbeing-app
+  Terminal=false
+  Type=Application
+  Categories=Utility;GTK;
+
+Provide a final checklist:
+  [ ] App launches without errors: wellbeing-app
+  [ ] Window shows with sidebar navigation
+  [ ] Prayer times calculated correctly for your location
+  [ ] Adhan plays (after placing audio file)
+  [ ] Lock overlay shows fullscreen
+  [ ] Eye-care overlay fires every 20 min
+  [ ] Zikr sequence plays
+  [ ] Settings save and persist after restart
+  [ ] Systemd service starts: systemctl --user start wellbeing-app
+  [ ] Tray icon appears
+  [ ] Import/export works
+  [ ] All 13 sidebar pages load without errors

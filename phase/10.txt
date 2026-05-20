@@ -1,0 +1,68 @@
+Phase 10 — Zikr Sequence Configuration System
+
+Build the advanced Zikr sequence configuration system — the most complex feature.
+
+This extends Phase 9's ZikrSequencePlayer with full user configurability.
+
+Enhance zikr_sequences and zikr_steps tables with additional columns:
+  zikr_steps: ADD COLUMN weighted_probabilities TEXT (JSON: {"widget_id": weight_float})
+  zikr_steps: ADD COLUMN conditions_json TEXT (JSON: conditions for conditional display)
+  zikr_sequences: ADD COLUMN description TEXT, created_at TEXT, updated_at TEXT
+
+Enhance ZikrSequencePlayer:
+
+Weighted random selection:
+  When selection_mode='random_one' or 'random_n' AND weighted_probabilities is set:
+  Use weighted random selection: widget with weight 3.0 is 3x more likely than weight 1.0
+  Implement using Python's random.choices(population, weights)
+
+Conditional display:
+  conditions_json format: { "prayer": "fajr", "time_after": "sunset", "day_of_week": [0,4] }
+  Before showing a step, evaluate conditions:
+    - prayer: only show if current prayer matches
+    - time_after/time_before: only show if current time is after/before specified event
+    - day_of_week: 0=Monday, 6=Sunday
+  If conditions not met: skip this step
+
+Loop modes:
+  'once': play all steps once then emit sequence_complete
+  'loop': loop entire sequence indefinitely
+  'infinite': loop but allow user to advance/dismiss at any time
+  'manual': user presses key/click to advance to next step (duration becomes max_duration)
+
+User advance controls:
+  In non-locked overlays: show subtle "→ Next" button or detect right arrow key
+  In 'manual' mode: pressing Space/Enter/Right Arrow advances to next step
+
+Create wellbeing_app/gui/pages/zikr_sequence_editor.py — ZikrSequenceEditorPage:
+
+This is a visual sequence editor in the settings GUI.
+
+Left panel: list of saved sequences (Gtk.ListBox)
+  - Add Sequence button
+  - Each row: sequence name, step count, edit/delete buttons
+
+Right panel (when sequence selected): sequence detail editor
+  Sequence name field (editable)
+  Loop mode dropdown
+  
+  Steps list (Gtk.ListBox, drag-to-reorder using Gtk.DragSource/Gtk.DropTarget):
+    Each step row shows:
+      - Step number
+      - Selection mode badge (Fixed/Random1/RandomN)
+      - Widget count
+      - Duration
+      - Expand button → shows widget picker and settings
+    
+    Expanded step editor:
+      - Selection mode: DropDown (Fixed, Random One, Random N)
+      - N count (if Random N): SpinButton
+      - Widget picker: checklist of available widget_templates
+      - Duration: SpinButton (seconds)
+      - Transition: DropDown (fade/slide_left/slide_up/instant)
+      - Conditions: expandable section with prayer/time/day conditions
+      - Weighted probabilities: sliders for each selected widget (only if random mode)
+  
+  "Preview Sequence" button → launches ZikrOverlay with this sequence immediately
+
+Also add to ZikrOverlay: a subtle step indicator at bottom (dots showing current/total steps, like a slideshow indicator).

@@ -1,0 +1,159 @@
+Phase 4 — Background Daemon
+
+I have prayer and jamah engines working. Now build the background daemon.
+
+Create wellbeing_app/daemon/service.py
+
+Architecture: GLib main loop with async event scheduling.
+Do NOT use threading.Thread for scheduling.
+Use GLib.timeout_add_seconds and GLib.idle_add for all timing.
+
+────────────────────────────────────────────
+WellbeingDaemon class
+────────────────────────────────────────────
+
+__init__:
+  - Loads config from SQLite
+  - Instantiates PrayerEngine (from wellbeing_app.prayer.engine)
+  - Instantiates JamahStore (from wellbeing_app.prayer.jamah)
+  - Sets up callback registry for events
+
+start():
+  - Calculates today's schedule using PrayerEngine and JamahStore
+  - Schedules GLib timers for each upcoming event today
+  - Schedules daily recalculation at midnight
+  - Starts EyeCareScheduler (stub — Phase 7 implements it)
+  - Logs all scheduled events to ~/.local/state/wellbeing-app/daemon.log
+
+────────────────────────────────────────────
+IQAMAH CALCULATION
+────────────────────────────────────────────
+
+The daemon computes iqamah times internally. They are never stored
+in the database and never shown in the UI.
+
+Logic:
+  jamah_times = JamahStore.get_all_jamah_times()
+  iqamah_offset = db.get('iqamah_config.global_offset_minutes', default=5)
+
+  For each prayer in ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']:
+    jamah_time_str = jamah_times.get(prayer)
+    if jamah_time_str is None:
+      skip — no iqamah or lock for this prayer
+      continue
+    jamah_dt = parse jamah_time_str ('HH:MM') into today's timezone-aware datetime
+    iqamah_dt = jamah_dt - timedelta(minutes=iqamah_offset)
+    schedule IQAMAH_TIME event at iqamah_dt
+
+────────────────────────────────────────────
+EVENT TYPES
+────────────────────────────────────────────
+
+ADHAN_TIME(prayer_name)
+  → triggers audio playback + optional notification
+  → fired at prayer time + adhan_config.delay_seconds offset
+
+IQAMAH_TIME(prayer_name)
+  → triggers iqamah audio playback via AudioEngine
+  → only fires if jamah_times.time is set for this prayer
+
+LOCK_OVERLAY_TRIGGER(prayer_name)
+  → fires 30 seconds after IQAMAH_TIME
+  → implemented as: inside IQAMAH_TIME callback:
+      GLib.timeout_add_seconds(30, self._fire_lock_overlay, prayer_name)
+
+EYECARE_OVERLAY_TRIGGER
+  → fires every N minutes (default 20)
+  → managed by EyeCareScheduler (Phase 7)
+
+REMINDER_TRIGGER(reminder_id)
+  → fires at scheduled reminder time
+  → managed by ReminderScheduler (Phase 13)
+
+────────────────────────────────────────────
+SCHEDULING LOGIC
+────────────────────────────────────────────
+
+On start():
+  now = datetime.now(local_tz)
+  for each event in today's schedule:
+    if event_time > now:
+      delay_seconds = int((event_time - now).total_seconds())
+      GLib.timeout_add_seconds(delay_seconds, callback)
+
+Each callback fires once then reschedules for tomorrow if recurring.
+
+Daily recalculation:
+  midnight = tomorrow 00:01 local time
+  delay = int((midnight - now).total_seconds())
+  GLib.timeout_add_seconds(delay, self._recalculate_daily)
+
+────────────────────────────────────────────
+EyeCareScheduler STUB
+────────────────────────────────────────────
+
+Add this class at the bottom of daemon/service.py.
+Phase 7 will replace the body with real implementation.
+
+class EyeCareScheduler:
+  """Stub. Fully implemented in Phase 7."""
+
+  def __init__(self, daemon):
+    self.daemon = daemon
+    self._timer_id = None
+
+  def start(self):
+    pass  # Phase 7 implements this
+
+  def stop(self):
+    if self._timer_id:
+      GLib.source_remove(self._timer_id)
+      self._timer_id = None
+
+────────────────────────────────────────────
+ReminderScheduler STUB
+────────────────────────────────────────────
+
+class ReminderScheduler:
+  """Stub. Fully implemented in Phase 13."""
+
+  def __init__(self, daemon):
+    self.daemon = daemon
+
+  def start(self):
+    pass  # Phase 13 implements this
+
+────────────────────────────────────────────
+LOGGER
+────────────────────────────────────────────
+
+Create wellbeing_app/daemon/logger.py:
+  - Logs to ~/.local/state/wellbeing-app/daemon.log
+  - Rotates at 5MB, keeps 3 backups
+  - Format: [2025-01-15 14:32:01] INFO DAEMON: message
+  - Use Python logging.handlers.RotatingFileHandler
+
+────────────────────────────────────────────
+WATCHDOG STUB
+────────────────────────────────────────────
+
+Create wellbeing_app/daemon/watchdog.py:
+
+class WatchdogService:
+  """Stub. Fully implemented in Phase 19."""
+
+  def __init__(self, daemon):
+    self.daemon = daemon
+
+  def start(self):
+    pass
+
+────────────────────────────────────────────
+TEST
+────────────────────────────────────────────
+
+Provide a test that:
+  - Starts the daemon
+  - Prints all scheduled events for today with times
+  - Exits after 5 seconds
+  - Confirms no crash and no import errors

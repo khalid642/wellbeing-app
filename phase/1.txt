@@ -1,0 +1,155 @@
+Phase 1
+
+Build the complete project skeleton for "Wellbeing App", a production GTK4 + Libadwaita Islamic wellbeing desktop app for Fedora Linux / i3wm.
+
+Create this exact directory and file structure:
+
+wellbeing-app/
+├── wellbeing_app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── constants.py
+│   ├── daemon/
+│   │   ├── __init__.py
+│   │   └── service.py
+│   ├── storage/
+│   │   ├── __init__.py
+│   │   ├── database.py
+│   │   └── schema.sql
+│   ├── settings/
+│   │   ├── __init__.py
+│   │   └── config.py
+│   ├── gui/
+│   │   ├── __init__.py
+│   │   ├── application.py
+│   │   ├── main_window.py
+│   │   └── pages/
+│   │       ├── __init__.py
+│   │       └── dashboard.py
+│   └── themes/
+│       ├── __init__.py
+│       └── style.css
+├── data/
+│   ├── wellbeing-app.desktop
+│   └── icons/
+│       └── wellbeing-app.svg
+├── systemd/
+│   └── wellbeing-app.service
+├── setup.py
+├── pyproject.toml
+└── README.md
+
+Requirements:
+- Python 3.13+, GTK4, Libadwaita
+- Config directory: ~/.config/wellbeing-app
+- Cache directory: ~/.cache/wellbeing-app
+- Logs directory: ~/.local/state/wellbeing-app
+- All dirs created on first run if missing
+
+Database schema (storage/schema.sql):
+
+CREATE TABLE IF NOT EXISTS app_config (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS prayer_config (
+  id INTEGER PRIMARY KEY,
+  location_mode TEXT DEFAULT 'manual',
+  latitude REAL DEFAULT 21.3891,
+  longitude REAL DEFAULT 39.8579,
+  timezone TEXT DEFAULT 'Asia/Riyadh',
+  calculation_method TEXT DEFAULT 'MuslimWorldLeague',
+  madhab TEXT DEFAULT 'shafi',
+  high_lat_rule TEXT DEFAULT 'AngleBased'
+);
+
+CREATE TABLE IF NOT EXISTS jamah_times (
+  prayer TEXT PRIMARY KEY,
+  time TEXT,
+  enabled INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS adhan_config (
+  id INTEGER PRIMARY KEY,
+  prayer TEXT,
+  audio_file TEXT,
+  delay_seconds INTEGER DEFAULT 0,
+  volume REAL DEFAULT 0.8,
+  enabled INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS iqamah_config (
+  id INTEGER PRIMARY KEY,
+  global_offset_minutes INTEGER DEFAULT 5
+);
+
+CREATE TABLE IF NOT EXISTS zikr_sequences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  loop_mode TEXT DEFAULT 'once'
+);
+
+CREATE TABLE IF NOT EXISTS zikr_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sequence_id INTEGER REFERENCES zikr_sequences(id),
+  step_order INTEGER,
+  selection_mode TEXT CHECK(selection_mode IN ('fixed','random_one','random_n')),
+  n_count INTEGER DEFAULT 1,
+  widget_ids TEXT,
+  duration_seconds INTEGER DEFAULT 30,
+  transition TEXT DEFAULT 'fade'
+);
+
+CREATE TABLE IF NOT EXISTS widget_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  category TEXT,
+  widget_type TEXT,
+  config_json TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS themes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT,
+  is_active INTEGER DEFAULT 0,
+  config_json TEXT
+);
+
+-- overlay_widget_assignments is defined in Phase 6
+-- reminders is defined in Phase 13
+
+Insert these default rows on first run:
+- prayer_config: one row with all defaults
+- iqamah_config: one row with global_offset_minutes=5
+- jamah_times: five rows for fajr/dhuhr/asr/maghrib/isha with time=NULL and enabled=1
+
+The GTK4 main window must:
+- Use AdwApplicationWindow
+- Show a basic placeholder dashboard page with app name and welcome message
+- Apply CSS from style.css using Gtk.CssProvider
+- Handle Wayland and X11
+- Respect system light/dark mode via Adw.StyleManager
+
+The CSS (style.css) must define:
+- .glass-card { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; }
+- Smooth transitions on all interactive elements (200ms ease)
+
+The systemd service file must:
+- Be a user service (not system)
+- Use Type=simple
+- Restart=on-failure
+- Reference the correct Python entry point
+
+The pyproject.toml must use setuptools with proper entry_points
+console_scripts pointing to wellbeing_app.main:main.
+
+After generating all files, provide exact terminal commands to:
+1. Install system dependencies on Fedora (dnf)
+2. Install Python dependencies (pip)
+3. Run the app
+4. Verify the window opens on i3wm/Wayland
+
+Do NOT stub functions with pass if the function has a clear implementation.
+Write real working code.

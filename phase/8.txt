@@ -1,0 +1,582 @@
+Phase 8 — Dashboard & Main Window GUI
+
+Build the main application window and dashboard. This must look like a modern,
+polished GNOME app. Follow every instruction exactly — do not substitute widget
+types, do not guess icon names, do not use GTK3 patterns.
+
+────────────────────────────────────────────
+CRITICAL RULES — READ BEFORE WRITING ANY CODE
+────────────────────────────────────────────
+
+1. NEVER use Gtk.IconTheme.get_default() — it does not exist in GTK4.
+   Use Gtk.IconTheme.get_for_display(Gdk.Display.get_default()) instead.
+
+2. NEVER use widget.get_style_context().add_class() — deprecated in GTK4.
+   Use widget.add_css_class('classname') instead.
+
+3. NEVER use Gtk.HBox or Gtk.VBox — they do not exist in GTK4.
+   Use Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL) etc.
+
+4. NEVER use Gtk.Label.set_markup() without escaping user data first.
+   Use GLib.markup_escape_text() on any dynamic string before markup.
+
+5. NEVER guess icon names. Use ONLY these verified GTK4/GNOME icon names:
+   go-next-symbolic
+   go-previous-symbolic
+   list-add-symbolic
+   edit-delete-symbolic
+   emblem-ok-symbolic
+   dialog-warning-symbolic
+   audio-volume-high-symbolic
+   preferences-system-symbolic
+   view-refresh-symbolic
+   weather-clear-symbolic
+   document-save-symbolic
+   document-open-symbolic
+   media-playback-start-symbolic
+   media-playback-stop-symbolic
+   applications-system-symbolic
+   system-shutdown-symbolic
+   user-info-symbolic
+   open-menu-symbolic
+   pan-down-symbolic
+   pan-end-symbolic
+   pan-start-symbolic
+   object-select-symbolic
+   edit-clear-symbolic
+
+   For any other concept use a plain colored Gtk.Box as placeholder.
+   DO NOT invent icon names — they fail silently and show broken icons.
+
+6. NEVER use deprecated Adw.ActionRow for navigation — use Gtk.ListBoxRow
+   with manual content for sidebar items.
+
+7. AdwPreferencesGroup requires being inside AdwPreferencesWindow OR used
+   directly inside a plain Gtk.ScrolledWindow + Gtk.Box. Do NOT nest
+   AdwPreferencesPage inside AdwApplicationWindow directly.
+
+8. For all CSS: load via Gtk.CssProvider and
+   Gtk.StyleContext.add_provider_for_display().
+   Use provider.load_from_string() with CSS as a Python string.
+
+9. Adw.ViewStack + Adw.ViewSwitcher is the correct GTK4 pattern for tabbed
+   content. Do NOT use Gtk.Notebook.
+
+10. Always set hexpand=True / vexpand=True explicitly.
+
+────────────────────────────────────────────
+MAIN WINDOW
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/application.py
+
+class WellbeingApplication(Adw.Application):
+  application_id = 'com.wellbeingapp.App'
+
+  def __init__(self):
+    super().__init__(application_id=self.application_id,
+                     flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+    self.connect('activate', self._on_activate)
+
+  def _on_activate(self, app):
+    self._load_css()
+    win = MainWindow(application=app)
+    win.present()
+
+  def _load_css(self):
+    css_path = Path(__file__).parent.parent / 'themes' / 'style.css'
+    css_content = css_path.read_text()
+    provider = Gtk.CssProvider()
+    provider.load_from_string(css_content)
+    Gtk.StyleContext.add_provider_for_display(
+      Gdk.Display.get_default(),
+      provider,
+      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+File: wellbeing_app/gui/main_window.py
+
+class MainWindow(Adw.ApplicationWindow):
+
+  set_default_size(1100, 720)
+
+  Structure:
+    toolbar_view = Adw.ToolbarView()
+    toolbar_view.add_top_bar(Adw.HeaderBar())
+    toolbar_view.set_content(main_hbox)
+    self.set_content(toolbar_view)
+
+  HeaderBar:
+    title_widget = Adw.WindowTitle(title='Wellbeing App', subtitle='')
+    Update subtitle with next prayer every 30 seconds:
+      'Next: Dhuhr 13:42'
+    End widget: Gtk.MenuButton(icon_name='open-menu-symbolic')
+
+  main_hbox = Gtk.Box(orientation=HORIZONTAL)
+    sidebar (Gtk.Box, orientation=VERTICAL, width_request=220)
+    Gtk.Separator(orientation=VERTICAL)
+    content_stack (Gtk.Stack, hexpand=True, vexpand=True)
+
+────────────────────────────────────────────
+SIDEBAR
+────────────────────────────────────────────
+
+Top: app identity box (margin=12, spacing=2):
+  Gtk.Label(label='Wellbeing', css_classes=['title-1'])
+  Gtk.Label(label='Islamic Focus App', css_classes=['caption', 'dim-label'])
+
+Navigation list:
+  Gtk.ListBox(
+    selection_mode=Gtk.SelectionMode.SINGLE,
+    css_classes=['navigation-sidebar'],
+    vexpand=True
+  )
+
+Nav row builder:
+  def make_nav_row(icon_name: str, label_text: str) -> Gtk.ListBoxRow:
+    row = Gtk.ListBoxRow()
+    row.set_margin_start(4)
+    row.set_margin_end(4)
+    row.set_margin_top(2)
+    row.set_margin_bottom(2)
+
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    box.set_margin_start(8)
+    box.set_margin_end(8)
+    box.set_margin_top(8)
+    box.set_margin_bottom(8)
+
+    icon = Gtk.Image.new_from_icon_name(icon_name)
+    icon.set_icon_size(Gtk.IconSize.NORMAL)
+    icon.add_css_class('dim-label')
+
+    label = Gtk.Label(label=label_text, xalign=0, hexpand=True)
+
+    box.append(icon)
+    box.append(label)
+    row.set_child(box)
+    return row
+
+Nav items — 13 items, ALL verified icon names:
+  ('weather-clear-symbolic',        'Dashboard')
+  ('preferences-system-symbolic',   'Prayer')
+  ('audio-volume-high-symbolic',    'Adhan')
+  ('object-select-symbolic',        'Jamah')
+  ('view-refresh-symbolic',         'Zikr')
+  ('list-add-symbolic',             'Overlays')
+  ('applications-system-symbolic',  'Widgets')
+  ('document-save-symbolic',        'Reminders')
+  ('media-playback-start-symbolic', 'Theme')
+  ('document-open-symbolic',        'Audio')
+  ('user-info-symbolic',            'Import/Export')
+  ('open-menu-symbolic',            'Plugins')
+  ('emblem-ok-symbolic',            'Logs')
+
+Connect: listbox.connect('row-selected', self._on_nav_selected)
+  In handler: switch content_stack to matching page name
+
+Bottom status bar (margin=8, spacing=8):
+  status_dot = Gtk.Label(label='●')
+  Gtk.Label(label='Daemon running', css_classes=['caption'])
+  Update every 5 seconds via GLib.timeout_add_seconds(5, update_status)
+  Running: status_dot.add_css_class('success')
+  Stopped: status_dot.add_css_class('error')
+
+────────────────────────────────────────────
+CONTENT STACK
+────────────────────────────────────────────
+
+Gtk.Stack:
+  transition_type = Gtk.StackTransitionType.SLIDE_LEFT_RIGHT
+  transition_duration = 200
+
+Add pages — real pages where built, placeholders for the rest:
+  stack.add_named(DashboardPage(),      'dashboard')
+  stack.add_named(PrayerSettingsPage(), 'prayer')
+  stack.add_named(AdhanSettingsPage(),  'adhan')
+  stack.add_named(JamahSettingsPage(),  'jamah')
+  stack.add_named(make_placeholder('Zikr'),         'zikr')
+  stack.add_named(make_placeholder('Overlays'),     'overlays')
+  stack.add_named(make_placeholder('Widgets'),      'widgets')
+  stack.add_named(make_placeholder('Reminders'),    'reminders')
+  stack.add_named(make_placeholder('Theme'),        'theme')
+  stack.add_named(make_placeholder('Audio'),        'audio')
+  stack.add_named(make_placeholder('Import/Export'),'import_export')
+  stack.add_named(make_placeholder('Plugins'),      'plugins')
+  stack.add_named(make_placeholder('Logs'),         'logs')
+
+def make_placeholder(name: str) -> Gtk.Label:
+  label = Gtk.Label(label=f'{name} — coming in a later phase')
+  label.add_css_class('dim-label')
+  label.set_vexpand(True)
+  label.set_valign(Gtk.Align.CENTER)
+  return label
+
+Show dashboard on start:
+  stack.set_visible_child_name('dashboard')
+  listbox.select_row(listbox.get_row_at_index(0))
+
+Nav page name mapping (index → stack name):
+  0=dashboard, 1=prayer, 2=adhan, 3=jamah, 4=zikr,
+  5=overlays, 6=widgets, 7=reminders, 8=theme, 9=audio,
+  10=import_export, 11=plugins, 12=logs
+
+────────────────────────────────────────────
+DASHBOARD PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/dashboard.py
+
+class DashboardPage(Gtk.ScrolledWindow):
+
+  All widget references stored as instance variables.
+  Build widgets once in __init__. Update labels in refresh_data().
+  NEVER rebuild widgets on refresh — only call label.set_label(new_text).
+
+  Contents inside Gtk.Box(orientation=VERTICAL, spacing=24,
+                          margin_top=24, margin_bottom=24,
+                          margin_start=24, margin_end=24):
+
+  ── Section 1: Date Header ──────────────────
+
+  Gtk.Box(orientation=HORIZONTAL):
+    Left (Gtk.Box, orientation=VERTICAL, spacing=2):
+      self._date_label = Gtk.Label(css_classes=['title-2'])
+      self._hijri_label = Gtk.Label(css_classes=['body', 'dim-label'])
+    Right (hexpand=True, halign=END):
+      self._location_label = Gtk.Label(css_classes=['body', 'dim-label'])
+
+  ── Section 2: Next Prayer Countdown ────────
+
+  Gtk.Box(css_classes=['card'], orientation=VERTICAL, margin_top=4):
+    inner (margin=20, spacing=8, orientation=VERTICAL):
+      Gtk.Label('NEXT PRAYER', css_classes=['caption', 'dim-label'])
+      self._next_prayer_name = Gtk.Label(css_classes=['title-1'])
+      self._countdown_label = Gtk.Label(css_classes=['display'])
+      self._next_prayer_time = Gtk.Label(css_classes=['body', 'dim-label'])
+
+  Countdown update:
+    GLib.timeout_add_seconds(1, self._update_countdown)
+    _update_countdown must return GLib.SOURCE_CONTINUE
+
+  ── Section 3: Prayer Times Grid ────────────
+
+  Gtk.Label('Today\'s Prayers', xalign=0, css_classes=['heading'])
+
+  Gtk.Box(orientation=HORIZONTAL, spacing=12, homogeneous=True):
+    Build 5 prayer cards using make_prayer_card()
+    Store label references per prayer for refresh:
+      self._prayer_labels = {
+        'fajr': { 'time': label_ref, 'jamah': label_ref, 'status': label_ref },
+        ...
+      }
+
+  def make_prayer_card(self, prayer_name) -> Gtk.Box:
+    outer = Gtk.Box(orientation=VERTICAL, css_classes=['card'])
+    outer.set_hexpand(True)
+
+    inner = Gtk.Box(orientation=VERTICAL, spacing=6,
+                    margin_top=16, margin_bottom=16,
+                    margin_start=12, margin_end=12)
+
+    name_lbl   = Gtk.Label(label=prayer_name, css_classes=['heading'], xalign=0)
+    time_lbl   = Gtk.Label(css_classes=['title-2'], xalign=0)
+    jamah_row  = Gtk.Box(orientation=HORIZONTAL, spacing=4)
+    jamah_key  = Gtk.Label(label='Jamah ', css_classes=['caption','dim-label'])
+    jamah_val  = Gtk.Label(css_classes=['caption'])
+    status_lbl = Gtk.Label(css_classes=['caption'], xalign=0)
+
+    jamah_row.append(jamah_key)
+    jamah_row.append(jamah_val)
+    inner.append(name_lbl)
+    inner.append(time_lbl)
+    inner.append(jamah_row)
+    inner.append(status_lbl)
+    outer.append(inner)
+
+    Store references:
+      self._prayer_labels[prayer_name.lower()] = {
+        'time': time_lbl,
+        'jamah': jamah_val,
+        'status': status_lbl,
+        'card': outer
+      }
+    return outer
+
+  def _set_prayer_status(self, prayer_name, status):
+    lbl = self._prayer_labels[prayer_name]['status']
+    card = self._prayer_labels[prayer_name]['card']
+
+    for cls in ['success', 'accent', 'dim-label']:
+      lbl.remove_css_class(cls)
+    card.remove_css_class('prayer-card-current')
+
+    if status == 'current':
+      lbl.set_label('● Now')
+      lbl.add_css_class('success')
+      card.add_css_class('prayer-card-current')
+    elif status == 'next':
+      lbl.set_label('● Next')
+      lbl.add_css_class('accent')
+    elif status == 'passed':
+      lbl.set_label('Passed')
+      lbl.add_css_class('dim-label')
+    else:
+      lbl.set_label('Upcoming')
+      lbl.add_css_class('dim-label')
+
+  ── Section 4: Sunrise ──────────────────────
+
+  Gtk.Box(orientation=HORIZONTAL, spacing=8):
+    Gtk.Image.new_from_icon_name('weather-clear-symbolic')
+    Gtk.Label(label='Sunrise', css_classes=['body'])
+    self._sunrise_label = Gtk.Label(css_classes=['body','dim-label'],
+                                     hexpand=True, xalign=1)
+
+  ── Data loading ────────────────────────────
+
+  def refresh_data(self):
+    Called on init and every 60 seconds via GLib.timeout_add_seconds(60, ...).
+    
+    schedule = prayer_engine.get_today_schedule()
+    display  = prayer_engine.get_schedule_display()
+    jamah    = jamah_store.get_all_jamah_times()
+    current  = prayer_engine.get_current_prayer()
+    next_p, next_t = prayer_engine.get_next_prayer()
+
+    self._date_label.set_label(datetime.now().strftime('%A, %d %B %Y'))
+    self._hijri_label.set_label(gregorian_to_hijri(date.today()))
+    self._sunrise_label.set_label(display.get('sunrise', '—'))
+
+    self._next_prayer_name.set_label(next_p.capitalize())
+    self._next_prayer_time.set_label(f"at {next_t.strftime('%H:%M')}")
+
+    prayer_order = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
+    for prayer in prayer_order:
+      self._prayer_labels[prayer]['time'].set_label(display.get(prayer, '—'))
+      j = jamah.get(prayer)
+      self._prayer_labels[prayer]['jamah'].set_label(j if j else '—')
+
+    current_p = prayer_engine.get_current_prayer()
+    next_p_name, _ = prayer_engine.get_next_prayer()
+    for prayer in prayer_order:
+      if prayer == current_p:
+        self._set_prayer_status(prayer, 'current')
+      elif prayer == next_p_name:
+        self._set_prayer_status(prayer, 'next')
+      elif schedule[prayer] < datetime.now(schedule[prayer].tzinfo):
+        self._set_prayer_status(prayer, 'passed')
+      else:
+        self._set_prayer_status(prayer, 'upcoming')
+
+  def _update_countdown(self):
+    secs = prayer_engine.get_remaining_seconds()
+    h = secs // 3600
+    m = (secs % 3600) // 60
+    s = secs % 60
+    if h > 0:
+      self._countdown_label.set_label(f'{h}:{m:02d}:{s:02d}')
+    else:
+      self._countdown_label.set_label(f'{m:02d}:{s:02d}')
+    return GLib.SOURCE_CONTINUE
+
+────────────────────────────────────────────
+PRAYER SETTINGS PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/prayer_settings.py
+
+class PrayerSettingsPage(Gtk.ScrolledWindow):
+
+  inner = Gtk.Box(orientation=VERTICAL, spacing=16,
+                  margin_top=24, margin_bottom=24,
+                  margin_start=24, margin_end=24)
+
+  Group 1: AdwPreferencesGroup(title='Location')
+
+    AdwComboRow(title='Location Mode')
+      model = Gtk.StringList.new(['Manual', 'Auto-detect'])
+      row.set_model(model)
+      row.connect('notify::selected', self._on_mode_changed)
+
+    self._lat_row = AdwEntryRow(title='Latitude')
+    self._lon_row = AdwEntryRow(title='Longitude')
+    self._tz_row  = AdwEntryRow(title='Timezone')
+
+    detect_row = AdwActionRow(title='Detect Location Now',
+                              subtitle='Uses IP geolocation')
+    detect_btn = Gtk.Button(label='Detect', css_classes=['suggested-action'],
+                            valign=Gtk.Align.CENTER)
+    detect_btn.connect('clicked', self._on_detect)
+    detect_row.add_suffix(detect_btn)
+
+    Load current values from prayer_config on page show.
+
+    _on_detect:
+      Run auto_detect_location() in GLib.idle_add thread wrapper.
+      On result: populate lat/lon/tz fields and save to prayer_config.
+
+  Group 2: AdwPreferencesGroup(title='Calculation')
+
+    AdwComboRow(title='Calculation Method')
+      model = Gtk.StringList.new([
+        'Muslim World League', 'Egyptian', 'Karachi',
+        'Umm Al-Qura', 'Dubai', 'Kuwait', 'Singapore',
+        'Turkey', 'Tehran', 'North America', 'France'
+      ])
+
+    AdwComboRow(title='Madhab')
+      model = Gtk.StringList.new(['Shafi / Maliki / Hanbali', 'Hanafi'])
+
+    AdwComboRow(title='High Latitude Rule')
+      model = Gtk.StringList.new([
+        'Middle of Night', 'Seventh of Night', 'Angle Based', 'None'
+      ])
+
+  Save button:
+    Gtk.Button(label='Save and Recalculate',
+               css_classes=['suggested-action'],
+               halign=Gtk.Align.END,
+               margin_top=8)
+    On click: save all fields to prayer_config, call prayer_engine.invalidate_cache(),
+              refresh dashboard
+
+────────────────────────────────────────────
+ADHAN SETTINGS PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/adhan_settings.py
+
+class AdhanSettingsPage(Gtk.ScrolledWindow):
+
+  For each of 5 prayers build one AdwExpanderRow:
+
+    expander = AdwExpanderRow()
+    expander.set_title('Fajr')
+
+    Child rows added via expander.add_row(row):
+
+    1. Enable toggle:
+       row = AdwActionRow(title='Enable Adhan')
+       toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+       toggle.connect('notify::active', self._on_toggle, 'fajr')
+       row.add_suffix(toggle)
+       row.set_activatable_widget(toggle)
+       expander.add_row(row)
+
+    2. Delay:
+       row = AdwActionRow(title='Delay', subtitle='Minutes after prayer time')
+       spin = Gtk.SpinButton.new_with_range(0, 60, 1)
+       spin.set_valign(Gtk.Align.CENTER)
+       spin.connect('value-changed', self._on_delay, 'fajr')
+       row.add_suffix(spin)
+       expander.add_row(row)
+
+    3. Audio file:
+       row = AdwActionRow(title='Audio File')
+       file_label = Gtk.Label(label='Default', css_classes=['dim-label'],
+                              valign=Gtk.Align.CENTER)
+       browse_btn = Gtk.Button(label='Browse', css_classes=['flat'],
+                               valign=Gtk.Align.CENTER)
+       browse_btn.connect('clicked', self._on_browse, 'fajr', file_label)
+       row.add_suffix(file_label)
+       row.add_suffix(browse_btn)
+       expander.add_row(row)
+
+    4. Volume:
+       row = AdwActionRow(title='Volume')
+       scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+       scale.set_value(80)
+       scale.set_hexpand(True)
+       scale.set_size_request(150, -1)
+       scale.set_valign(Gtk.Align.CENTER)
+       row.add_suffix(scale)
+       expander.add_row(row)
+
+    5. Test:
+       row = AdwActionRow(title='Test Adhan')
+       btn = Gtk.Button(label='Play Now', css_classes=['flat'],
+                        valign=Gtk.Align.CENTER)
+       btn.connect('clicked', self._on_test, 'fajr')
+       row.add_suffix(btn)
+       expander.add_row(row)
+
+  File browser:
+    def _on_browse(self, btn, prayer, file_label):
+      dialog = Gtk.FileDialog.new()
+      dialog.set_title('Select Adhan Audio')
+      filter_ = Gtk.FileFilter()
+      filter_.set_name('Audio Files')
+      filter_.add_mime_type('audio/mpeg')
+      filter_.add_mime_type('audio/ogg')
+      filter_.add_mime_type('audio/wav')
+      filters = Gio.ListStore.new(Gtk.FileFilter)
+      filters.append(filter_)
+      dialog.set_filters(filters)
+      dialog.open(self.get_root(), None, self._on_file_chosen, prayer, file_label)
+
+    def _on_file_chosen(self, dialog, result, prayer, file_label):
+      try:
+        file = dialog.open_finish(result)
+        path = file.get_path()
+        file_label.set_label(os.path.basename(path))
+        self._save_audio_path(prayer, path)
+      except GLib.Error:
+        pass
+
+────────────────────────────────────────────
+CSS FILE
+────────────────────────────────────────────
+
+File: wellbeing_app/themes/style.css
+
+.glass-card {
+  background-color: alpha(white, 0.08);
+  border: 1px solid alpha(white, 0.15);
+  border-radius: 16px;
+}
+
+.prayer-card-current {
+  border-left: 3px solid @accent_bg_color;
+}
+
+.overlay-background {
+  background-color: alpha(black, 0.72);
+}
+
+.overlay-card {
+  background-color: alpha(white, 0.08);
+  border: 1px solid alpha(white, 0.18);
+  border-radius: 24px;
+  padding: 32px;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.fade-in {
+  animation: fade-in 400ms ease-out forwards;
+}
+
+────────────────────────────────────────────
+TESTING CHECKLIST
+────────────────────────────────────────────
+
+After generating, verify:
+  [ ] App launches: python -m wellbeing_app
+  [ ] Window appears, sidebar shows 13 rows
+  [ ] All 13 sidebar icons are visible (no broken icon boxes)
+  [ ] Clicking each row switches the content area
+  [ ] Dashboard shows real date and hijri date
+  [ ] Dashboard shows real calculated prayer times
+  [ ] Countdown counts down every second
+  [ ] Prayer cards show correct status badges
+  [ ] Adhan page expanders expand and collapse
+  [ ] File browser opens on Browse click
+  [ ] Jamah entry shows red border on invalid input (e.g. '99:99')
+  [ ] Jamah entry clears error on valid HH:MM input
+  [ ] Zikr and Plugins show placeholder pages
+  [ ] No GTK-CRITICAL or GTK-WARNING in terminal
+  [ ] No 'Failed to load icon' messages in terminal

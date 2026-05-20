@@ -1,0 +1,2 @@
+[console_scripts]
+wellbeing-app = wellbeing_app.main:main

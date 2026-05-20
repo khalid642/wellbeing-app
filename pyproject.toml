@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wellbeing-app"
+version = "0.1.0"
+description = "A modern Islamic wellbeing and focus application"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "PyGObject>=3.46.0"
+]
+
+[project.scripts]
+wellbeing-app = "wellbeing_app.main:main"

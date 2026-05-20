@@ -1,0 +1,58 @@
+Phase 5 — Audio Engine
+
+Build the complete audio engine for Wellbeing App.
+
+Create wellbeing_app/audio/__init__.py and wellbeing_app/audio/engine.py
+
+Use GStreamer via gi.repository.Gst (already available on Fedora with python3-gstreamer1).
+Do NOT use pygame or pygame.mixer. Do NOT use subprocess to call paplay/mpv.
+GStreamer is the correct approach for a production GTK4 app.
+
+AudioEngine class requirements:
+
+play_adhan(audio_file: str, volume: float = 1.0, fade_in_seconds: float = 1.5):
+  - Plays the given audio file
+  - Supports fade in from 0 to volume over fade_in_seconds
+  - If another adhan is playing, stop it first
+  - Audio files can be mp3, ogg, wav, opus
+
+play_iqamah(audio_file: str, volume: float = 1.0):
+  - Same as play_adhan but for iqamah audio
+  - Runs independently from adhan
+
+play_ambient(audio_file: str, loop: bool = True, volume: float = 0.4):
+  - Plays looping background audio (for overlays)
+  - Multiple ambient channels may play simultaneously
+
+stop_all(fade_out_seconds: float = 1.5):
+  - Fades out all currently playing audio then stops
+
+set_volume(channel: str, volume: float):
+  - channel: 'adhan', 'iqamah', 'ambient'
+  - volume: 0.0 to 1.0
+
+is_playing(channel: str) -> bool
+
+Also create wellbeing_app/audio/adhan_library.py:
+
+AdhanLibrary class:
+  - Scans ~/.config/wellbeing-app/audio/adhan/ for audio files
+  - Scans the app's bundled audio directory (data/audio/adhan/)
+  - Returns list of available adhans with metadata: {name, file_path, is_custom}
+  - get_adhan_for_prayer(prayer_name: str, config: AdhanConfig) -> str
+    Returns path to audio file. Supports:
+    - specific file per prayer
+    - random selection from a list
+    - fallback to default
+
+Also update adhan_config table:
+  ADD COLUMN audio_file_list TEXT  (JSON array of paths for random selection)
+  ADD COLUMN random_selection INTEGER DEFAULT 0
+
+Create data/audio/adhan/ directory and add a README explaining where to place audio files. (We can't include actual audio, but the code must work when files are placed there.)
+
+Create a test script that:
+  - Lists available adhan files
+  - Plays a test tone (generate a 440Hz sine wave for 2 seconds using GStreamer audiotestsrc)
+  - Tests fade in/out
+  - This test must work without actual audio files by using audiotestsrc

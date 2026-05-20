@@ -1,0 +1,28 @@
+/* Glassmorphism styling */
+.glass-card {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    transition: all 200ms ease;
+}
+
+.glass-card:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Ensure interactive elements have smooth transitions */
+button, entry, scale, switch {
+    transition: all 200ms ease;
+}
+
+/* Dark mode overrides */
+@media (prefers-color-scheme: dark) {
+    .glass-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .glass-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
+}

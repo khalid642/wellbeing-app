@@ -1,0 +1,256 @@
+Phase 0 — Project Brief & Memory
+
+Read this entire message carefully and memorize it completely.
+Do NOT write any code. Do NOT create any files. Do NOT install anything.
+Do NOT suggest anything. Do NOT ask questions.
+
+Your only task right now is to acknowledge that you have read and 
+understood this brief. You will refer back to this in every future 
+phase of this project.
+
+This is a 20-phase project. You will receive one phase at a time.
+Wait for each phase prompt before doing anything.
+
+────────────────────────────────────────────
+WHAT YOU ARE BUILDING
+────────────────────────────────────────────
+
+A production Linux desktop application called "Wellbeing App".
+
+It runs on Fedora Linux with i3 window manager.
+It is built with Python 3.13+, GTK4, and Libadwaita.
+It has a modern glassmorphism UI with blur, transparency, and smooth animations.
+
+────────────────────────────────────────────
+HOW THE USER WILL USE THIS APP
+────────────────────────────────────────────
+
+This app lives in the background as a daemon while the user works
+on their computer. It serves as an Islamic digital companion that
+manages prayer times, focus breaks, and spiritual reminders
+throughout the user's day automatically.
+
+Here is the complete user journey from morning to night:
+
+── PRAYER TIMES ────────────────────────────
+
+The app calculates accurate daily prayer times based on the user's
+location, chosen calculation method (e.g. Muslim World League),
+and madhab (Hanafi or Shafi).
+
+The user opens the main GUI to see today's prayer schedule:
+Fajr, Dhuhr, Asr, Maghrib, Isha — with their Jamah times shown
+next to each prayer. The user sets Jamah times manually per prayer(it remains unchanged until user changes it manually, if the time is outside prayer time it shows warning and asks user to correct it ).
+There is no automatic Jamah calculation. Hijri date is shown.
+
+── ADHAN ───────────────────────────────────
+
+When a prayer time arrives, the app plays the Adhan audio.
+The user can configure:
+  - Which audio file to use per prayer
+  - How many minutes after prayer start the Adhan plays
+  - Volume and fade-in behaviour
+
+── IQAMAH & SALAH LOCK ─────────────────────
+
+5 minutes before the user's manually set Jamah time (configurable),
+the app plays the Iqamah audio quietly in the background.
+
+The user does not see Iqamah time anywhere in the UI.
+It is an internal trigger only.
+
+30 seconds after Iqamah plays, the screen is taken over by a
+fullscreen lock overlay — similar to i3lock in behaviour.
+
+This overlay is blurred, dark, translucent glassmorphism.
+It is locked for 15 minutes (configurable).
+During lock the user cannot dismiss it.
+After 15 minutes the user can press Enter or Space to close it.
+If the user set a password, they must enter it to unlock.
+
+The overlay displays widgets the user has configured:
+for example a prayer name, a countdown timer, a tasbih counter,
+a Quranic verse, or a dua.
+
+── EYE-CARE BREAK ──────────────────────────
+
+Every 20 minutes (configurable) throughout the user's work session,
+a fullscreen overlay appears automatically.
+
+It is locked for 20 seconds (configurable).
+During those 20 seconds the user sees wellness widgets:
+breathing animation, blink reminder, posture reminder, etc.
+
+After 20 seconds the overlay unlocks but stays on screen.
+
+If the user presses any key: the eye-care overlay closes and
+immediately the Zikr overlay opens.
+
+If the user does not press any key within 5 seconds: the eye-care
+overlay closes silently and the user returns to work.
+
+── ZIKR OVERLAY ────────────────────────────
+
+The Zikr overlay is a fullscreen unlocked glassmorphism overlay.
+The user can dismiss it anytime with Escape or Space.
+
+It shows spiritual content widgets one after another in sequence:
+Adhkar, Quranic verses, duas, reflection prompts, audio recitation.
+
+The user configures Zikr sequences in the GUI:
+  - How many steps in the sequence
+  - What widget appears at each step
+  - Whether each step is fixed or randomly chosen from a group
+  - Duration of each step
+  - Transition animation between steps
+
+Example sequence the user might set up:
+  Step 1: always show SubhanAllah tasbih (33x)
+  Step 2: randomly pick one dua from a list of 5
+  Step 3: show Ayatul Kursi
+  Step 4: breathing animation
+
+── REMINDERS ───────────────────────────────
+
+The user can create custom scheduled overlays.
+Example: every day at 6:00 PM show an overlay with a specific
+widget for 5 minutes, locked or unlocked.
+
+Reminders can be daily, on specific weekdays, or one-time.
+They can launch overlays, play audio, or send notifications.
+
+── SINGLE UNIVERSAL OVERLAY ────────────────
+
+There is only ONE overlay window in the entire app.
+It handles all use cases: salah lock, eye-care, zikr, reminders.
+The difference is which widgets are loaded into it and whether
+it is in locked or unlocked mode.
+
+Overlays do not stack. If one is active, others wait.
+
+── WIDGETS ─────────────────────────────────
+
+All overlays are built from reusable widget templates.
+The user creates and manages these in the GUI.
+
+Widget types include:
+  Ayah (Quranic verse), Dua, Adhkar, Tasbih counter,
+  Breathing animation, Text note, Image, Audio player,
+  Countdown timer, Clock, Prayer info, Reflection prompt.
+
+The user assigns widgets to overlay slots in the Overlay Designer:
+  salah_lock slot → widgets shown during salah lock
+  eyecare slot    → widgets shown during eye-care break
+  zikr slot       → zikr sequence or individual widgets
+  reminder_{id}   → widgets for a specific reminder
+
+── IMPORT / EXPORT ─────────────────────────
+
+The user can export widget templates, overlay configurations,
+zikr sequences, and themes as .wbpkg files (zip packages).
+They can import these files by dragging and dropping.
+
+── THEMES ──────────────────────────────────
+
+The user can switch between light, dark, and AMOLED themes.
+They can customize accent color, blur intensity, transparency,
+font, and animation speed. Themes are CSS-based.
+
+── SYSTEM TRAY & MODES ─────────────────────
+
+The app has a system tray icon with a quick menu.
+The user can switch focus modes: Normal, Focus, Deep Focus,
+Prayer Mode, Silent.
+
+Each mode changes how the app behaves:
+Silent mode disables all overlays and audio.
+Deep Focus mode disables eye-care overlays but keeps adhan.
+
+────────────────────────────────────────────
+WHAT THE APP IS NOT
+────────────────────────────────────────────
+
+It is NOT a prayer app that only shows times.
+It is NOT a simple notification tool.
+It is NOT a basic screen locker.
+
+It is a full Islamic digital wellbeing environment that runs
+silently in the background and takes over the screen at the
+right moments to help the user stay connected to their faith
+and protect their eyes and focus throughout the day.
+
+────────────────────────────────────────────
+TECHNICAL CONSTANTS TO REMEMBER
+────────────────────────────────────────────
+
+Language:        Python 3.13+
+UI toolkit:      GTK4 + Libadwaita (PyGObject)
+OS:              Fedora Linux
+Window manager:  i3wm (tiling)
+Display:         Wayland first, X11 fallback
+Database:        SQLite at ~/.config/wellbeing-app/
+Config dir:      ~/.config/wellbeing-app/
+Cache dir:       ~/.cache/wellbeing-app/
+Logs dir:        ~/.local/state/wellbeing-app/
+Service:         systemd user service
+Overlay tech:    gtk4-layer-shell (Wayland), set_keep_above (X11)
+Audio:           GStreamer via gi.repository.Gst
+Scheduling:      GLib main loop (GLib.timeout_add_seconds)
+Timezone:        zoneinfo (Python stdlib)
+Prayer calc:     adhanpy
+Hijri:           hijri-converter
+Packaging:       RPM-ready structure
+
+────────────────────────────────────────────
+THE 20 PHASES AT A GLANCE
+────────────────────────────────────────────
+
+Phase 0:  This brief — read and memorize only
+Phase 1:  Project skeleton, directory structure, SQLite schema,
+          GTK4 window shell, systemd service
+Phase 2:  Prayer engine — accurate calculation, validation,
+          Hijri date, location detection
+Phase 3:  Jamah settings — manual time input only, iqamah offset
+Phase 4:  Background daemon — GLib scheduler, event system
+Phase 5:  Audio engine — GStreamer, adhan/iqamah playback, fades
+Phase 6:  Universal overlay window — locked/unlocked modes,
+          glassmorphism, Wayland/X11 support
+Phase 7:  Eye-care system — interval scheduler, wellness widgets,
+          breathing animation, zikr trigger logic
+Phase 8:  Main GUI — dashboard, prayer times display, settings
+          pages for prayer/adhan/jamah
+Phase 9:  Zikr widgets and sequence engine — spiritual widget
+          types, sequence player, sequence editor GUI
+Phase 10: Advanced zikr sequences — weighted random, conditions,
+          loop modes, step indicator
+Phase 11: Widget template system — CRUD, categories, seed data,
+          widget library GUI page
+Phase 12: Overlay designer — slot-based widget assignment,
+          live preview, overlay settings GUI
+Phase 13: Reminder system — scheduler, daemon integration,
+          reminder manager GUI
+Phase 14: Theme engine — CSS generation, built-in themes,
+          theme settings GUI
+Phase 15: Import/export system — .wbpkg format, validation,
+          drag-drop import GUI
+Phase 16: Remaining settings pages — audio, overlay config,
+          logs viewer, global search, single instance
+Phase 17: System integration — tray icon, DBus, focus modes,
+          autostart, i3wm notes
+Phase 18: Plugin system — widget plugin API, plugin manager GUI,
+          example weather plugin
+Phase 19: Watchdog, crash recovery, performance, final polish
+Phase 20: Packaging — RPM spec, install script, README,
+          desktop entry, final checklist
+
+────────────────────────────────────────────
+YOUR RESPONSE TO THIS MESSAGE
+────────────────────────────────────────────
+
+Reply with ONLY the following — nothing else:
+
+"Understood. I have read and memorized the Wellbeing App project
+brief. This is a 20-phase Islamic digital wellbeing desktop app
+for Fedora Linux with i3wm, built with Python 3.13+ and GTK4.
+I will not write any code or create any files until I receive
+Phase 1. Ready."

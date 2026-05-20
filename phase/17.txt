@@ -1,0 +1,68 @@
+Phase 17 — System Integration
+
+Build system integration: tray, DBus, focus modes, and startup.
+
+Create wellbeing_app/gui/tray.py — SystemTrayManager:
+
+Use AppIndicator3 (gi.repository.AppIndicator3) OR libayatana-appindicator.
+If neither is available, gracefully degrade (log warning, no crash).
+
+Tray icon: the app SVG icon
+Tray menu (Gtk.Menu):
+  App name (greyed label)
+  ─────────────────────
+  Next Prayer: Dhuhr at 13:42 (dynamically updated, greyed)
+  ─────────────────────
+  Open Dashboard
+  ─────────────────────
+  Focus Mode: OFF →  ✓ OFF / Focus / Deep Focus / Prayer Mode / Silent
+  ─────────────────────
+  Pause Eye-Care (15 min)  ← snooze eye-care
+  Pause Eye-Care (until next prayer)
+  ─────────────────────
+  Test Adhan
+  Test Lock Overlay
+  ─────────────────────
+  Quit
+
+Focus modes (implement in wellbeing_app/daemon/focus_mode.py):
+
+FocusMode enum: NORMAL, FOCUS, DEEP_FOCUS, PRAYER_MODE, SILENT
+
+NORMAL: everything works normally
+FOCUS: eye-care overlays still show; adhan plays but no lock overlay
+DEEP_FOCUS: no eye-care overlays; adhan plays as notification only (no sound lock)
+PRAYER_MODE: everything at full intensity; salah lock shows
+SILENT: no audio, no overlays, no notifications (emergencies only)
+
+Focus mode is stored in app_config table as 'focus_mode' key.
+Daemon checks focus mode before every event and adjusts behavior.
+Tray icon changes slightly per mode (different icon variant or color overlay).
+
+DBus integration (wellbeing_app/dbus/__init__.py and wellbeing_app/dbus/service.py):
+
+Register a DBus service: com.wellbeingapp.Daemon
+Methods exposed:
+  GetStatus() -> dict { daemon_running, current_prayer, next_prayer_time, focus_mode }
+  SetFocusMode(mode: str)
+  PauseEyeCare(minutes: int)
+  TriggerAdhan(prayer_name: str)  (for testing)
+  ShowOverlay(overlay_id: int)
+  GetVersion() -> str
+
+This allows external tools (scripts, i3 keybindings) to control the app via:
+  dbus-send --session --dest=com.wellbeingapp.Daemon --type=method_call /com/wellbeingapp/Daemon com.wellbeingapp.Daemon.SetFocusMode string:SILENT
+
+Startup on login:
+  Create wellbeing_app/utils/startup.py:
+    enable_autostart(): copies wellbeing-app.desktop to ~/.config/autostart/
+    disable_autostart(): removes it
+    is_autostart_enabled() -> bool
+  
+  Add autostart toggle to a new "General" section in settings (add 'General' sidebar item at top).
+
+i3wm specific notes (document in README):
+  Add to ~/.config/i3/config:
+    exec --no-startup-id wellbeing-app --daemon
+  The overlay will appear above all i3 windows via always-on-top + layer-shell
+  To control from i3 keybindings: use dbus-send commands

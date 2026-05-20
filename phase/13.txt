@@ -1,0 +1,188 @@
+Phase 13 — Reminder & Alarm System
+
+I have the universal OverlayWindow working. Now build the reminder and alarm system.
+
+Reminders trigger the universal OverlayWindow with their own widget slot and 
+locked/unlocked settings.
+
+────────────────────────────────────────────
+PART 1 — DATABASE
+────────────────────────────────────────────
+
+Final reminders table schema (replace any earlier version):
+
+CREATE TABLE reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  time TEXT NOT NULL,          -- 'HH:MM' 24h
+  days_of_week TEXT NOT NULL,  -- JSON array e.g. [0,1,2,3,4] Mon=0. [] means daily
+  recurring INTEGER DEFAULT 1, -- 1=recurring, 0=one-shot (disables after firing)
+  enabled INTEGER DEFAULT 1,
+
+  overlay_mode TEXT DEFAULT 'unlocked',  -- 'locked' or 'unlocked'
+  lock_duration_seconds INTEGER DEFAULT 300,
+
+  launch_type TEXT DEFAULT 'overlay',
+  -- 'overlay': show OverlayWindow with this reminder's widget slot
+  -- 'audio': play audio file only, no overlay
+  -- 'notification': desktop notification only
+
+  audio_file TEXT,             -- used if launch_type='audio'
+  notification_title TEXT,     -- used if launch_type='notification'
+  notification_body TEXT,
+
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+Widget slot for each reminder is: 'reminder_{id}'
+Widgets are stored in overlay_widget_assignments with overlay_slot='reminder_{id}'
+
+────────────────────────────────────────────
+PART 2 — REMINDER MANAGER
+────────────────────────────────────────────
+
+Create wellbeing_app/reminders/manager.py — ReminderManager:
+
+  create_reminder(name, time, days_of_week, recurring, overlay_mode,
+                  lock_duration_seconds, launch_type, ...) -> int (reminder_id)
+    After creating DB row: inserts a default text_widget into
+    overlay_widget_assignments for slot 'reminder_{id}'
+    Default widget text: reminder name
+
+  update_reminder(reminder_id, **kwargs)
+  delete_reminder(reminder_id)
+    Also deletes all overlay_widget_assignments for slot 'reminder_{id}'
+  
+  get_active_reminders() -> list[Reminder]
+  enable_reminder(reminder_id)
+  disable_reminder(reminder_id)
+
+  get_next_fire_time(reminder: Reminder, from_time: datetime) -> datetime | None:
+    Calculates next datetime this reminder should fire.
+    If days_of_week is empty: fires daily at reminder.time
+    If days_of_week has entries: finds next matching weekday at reminder.time
+    If from_time is past today's fire time: looks at tomorrow onwards
+    Returns None if reminder is disabled or one-shot already fired
+
+────────────────────────────────────────────
+PART 3 — DAEMON INTEGRATION
+────────────────────────────────────────────
+
+In wellbeing_app/daemon/service.py add ReminderScheduler:
+
+  On daemon start:
+    Load all active reminders via ReminderManager.get_active_reminders()
+    For each: calculate delay = next_fire_time - now
+    Register GLib.timeout_add_seconds(delay_seconds, fire_reminder_callback)
+
+  fire_reminder_callback(reminder_id):
+    Load reminder from DB
+    
+    If launch_type == 'overlay':
+      widgets = db.get_overlay_widgets(f'reminder_{reminder_id}')
+      config = OverlayConfig(
+        mode=reminder.overlay_mode,
+        duration_seconds=reminder.lock_duration_seconds,
+        widgets=widgets,
+        background_blur=True,
+        password=None,
+        auto_close=(reminder.overlay_mode == 'unlocked'),
+        overlay_id=f'reminder_{reminder_id}'
+      )
+      overlay_manager.show_overlay(config)
+    
+    If launch_type == 'audio':
+      AudioEngine.play_ambient(reminder.audio_file, loop=False, volume=1.0)
+    
+    If launch_type == 'notification':
+      Send desktop notification (gi.repository.Notify)
+      title=reminder.notification_title, body=reminder.notification_body
+    
+    If recurring=True:
+      Reschedule for next occurrence:
+        next_time = ReminderManager.get_next_fire_time(reminder, from_time=now + 60s)
+        GLib.timeout_add_seconds(delay_to_next_time, fire_reminder_callback)
+    
+    If recurring=False (one-shot):
+      ReminderManager.disable_reminder(reminder_id)
+
+────────────────────────────────────────────
+PART 4 — REMINDER SETTINGS GUI
+────────────────────────────────────────────
+
+Create wellbeing_app/gui/pages/reminder_manager.py — ReminderManagerPage
+
+Add "Reminders" to sidebar navigation.
+
+Header row: "Reminders" title + "Add Reminder" button (+ icon)
+
+Main area: vertical Gtk.ListBox of reminder cards
+
+Each reminder card (AdwActionRow or custom Gtk.Box):
+  Left: clock icon
+  Title: reminder name
+  Subtitle: time + days summary (e.g. "5:00 PM · Mon Wed Fri" or "8:00 PM · Daily")
+  Right side: enabled toggle switch + edit button (pencil icon) + delete button (trash)
+
+Empty state: if no reminders, show centered message "No reminders yet" + large Add button
+
+────────────────────────────────────────────
+ReminderEditorDialog
+────────────────────────────────────────────
+
+Opens as AdwDialog when Add or Edit is clicked.
+
+Fields:
+
+  Name: Gtk.Entry (required)
+
+  Time: two SpinButtons side by side (Hour 0-23, Minute 0-59) + AM/PM label
+    (store as 24h internally, display in 24h format)
+
+  Days: row of 7 toggle buttons labelled M T W T F S S
+    None selected = fires daily (show hint text "Daily" below)
+
+  Recurring: toggle switch
+    If OFF: show hint "This reminder fires once then disables itself"
+
+  Type: DropDown with 3 options:
+    "Show Overlay" | "Play Audio" | "Notification Only"
+
+  --- conditional fields based on Type ---
+
+  If "Show Overlay":
+    Mode: two radio buttons: Unlocked | Locked
+    If Locked: Duration SpinButton (minutes, 1–60)
+    
+    Widget section:
+      Shows current widget_assignments for this reminder's slot
+      (same ordered list UI as Overlay Designer left panel)
+      "Add Widget" button → same AddWidgetDialog from Phase 12
+
+  If "Play Audio":
+    FileChooserButton: select audio file (.mp3 .ogg .wav)
+    "Test" button: plays the file immediately
+
+  If "Notification Only":
+    Title: Gtk.Entry
+    Body: Gtk.TextView (multiline)
+
+  Bottom buttons: "Save" | "Cancel"
+  Validation: name required, time required, at least 1 widget if overlay type
+
+────────────────────────────────────────────
+PART 5 — DEFAULT REMINDERS
+────────────────────────────────────────────
+
+Insert 2 default reminders (disabled=1 so they don't fire until user enables them):
+
+  1. Name: "Evening Adhkar"
+     time: "20:00", days: [] (daily), recurring: 1
+     launch_type: 'overlay', overlay_mode: 'unlocked'
+     Default widget: adhkar_widget (SubhanAllah)
+
+  2. Name: "Morning Reminder"  
+     time: "07:00", days: [0,1,2,3,4] (weekdays), recurring: 1
+     launch_type: 'notification'
+     notification_title: "Good Morning"
+     notification_body: "Start your day with Bismillah"

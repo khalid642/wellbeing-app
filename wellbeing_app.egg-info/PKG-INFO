@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: wellbeing-app
+Version: 0.1.0
+Summary: A modern Islamic wellbeing and focus application
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: PyGObject>=3.46.0
+
+# Wellbeing App
+
+A production Linux desktop application built with Python 3.13+, GTK4, and Libadwaita.

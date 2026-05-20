@@ -1,0 +1,120 @@
+Phase 12 — Overlay Designer
+
+I have the universal OverlayWindow, all widget types, and the zikr sequence engine 
+working. Now build the visual overlay designer.
+
+The overlay designer manages widget assignments for each overlay slot.
+Slots are: 'salah_lock', 'eyecare', 'zikr', and any 'reminder_{id}' slots.
+The visual editor lets users pick a slot and configure which widgets appear in it.
+
+Create wellbeing_app/gui/pages/overlay_designer.py — OverlayDesignerPage
+
+Add "Overlays" to sidebar navigation.
+
+────────────────────────────────────────────
+LAYOUT
+────────────────────────────────────────────
+
+Top: slot selector row (horizontal AdwViewSwitcher or segmented buttons):
+  Salah Lock | Eye-care | Zikr | Reminders
+  Switching slot updates the entire page content below.
+
+Page splits into two panels:
+
+LEFT PANEL (320px wide) — Widget Assignment:
+
+  Section header: "Widgets for [slot name]"
+  
+  Ordered list (Gtk.ListBox) of current widget_assignments for the selected slot:
+    Each row:
+      Drag handle (⠿ icon, left side)
+      Widget type icon
+      Widget name
+      Small preview badge (category color)
+      Remove button (trash icon)
+    
+    Drag-to-reorder: Gtk.DragSource on handle, Gtk.DropTarget on list
+    On reorder: update display_order in overlay_widget_assignments immediately
+
+  "Add Widget" button at bottom of list:
+    Opens AddWidgetDialog (see below)
+
+  For 'zikr' slot only: show a toggle at top:
+    "Use Zikr Sequence instead of individual widgets"
+    If ON: shows sequence picker DropDown (lists all zikr_sequences)
+           hides the widget list
+           saves a single overlay_widget_assignment with widget_type='zikr_sequence'
+    If OFF: shows normal widget list
+
+RIGHT PANEL — Live Preview:
+
+  A scaled preview area (16:9 aspect ratio, fills available width)
+  
+  Background: dark overlay (rgba 0,0,0,0.72) — simulates overlay background
+  
+  Center card: glassmorphism card (matches OverlayWindow visual exactly)
+    Shows widgets stacked vertically in order from the left panel
+    Each widget is rendered using its actual Gtk widget class (real rendering, not mockup)
+    Wrapped in a Gtk.ScrolledWindow if content overflows
+
+  Below preview:
+    "Preview Fullscreen" button → launches actual OverlayWindow with current slot config
+    Mode indicator: shows "Locked" or "Unlocked" label based on slot type
+      (salah_lock = Locked, eyecare = Locked, zikr = Unlocked, reminders = depends)
+
+────────────────────────────────────────────
+AddWidgetDialog
+────────────────────────────────────────────
+
+A modal dialog (AdwDialog or Gtk.Dialog).
+
+Left side: category filter tabs (All / Spiritual / Health / Focus / Custom)
+Right side: grid of widget template cards
+
+Each card (150x120px):
+  Widget type icon (top)
+  Template name
+  Category color badge
+
+Clicking a card: selects it (highlighted border)
+"Add to Overlay" button at bottom: adds selected template to overlay_widget_assignments
+  with display_order = max existing + 1
+
+Search entry at top filters by name.
+
+────────────────────────────────────────────
+SLOT SETTINGS (below the two panels)
+────────────────────────────────────────────
+
+Shown below both panels, changes based on selected slot:
+
+For 'salah_lock':
+  Lock duration: SpinButton (minutes, default 15)
+  Password protection: toggle
+  If toggle ON: show password entry + confirm entry
+  These save to app_config keys: 'salah_lock_duration_minutes', 'salah_lock_password'
+
+For 'eyecare':
+  (These are the same fields as EyeCareSettingsPage — just cross-link or embed them)
+  Interval: SpinButton (minutes)
+  Lock duration: SpinButton (seconds)
+
+For 'zikr':
+  No extra settings (unlocked, no duration)
+
+For 'reminders':
+  Show message: "Reminder overlay settings are configured per reminder in the Reminders page."
+  Button: "Go to Reminders" → switches sidebar to reminders page
+
+────────────────────────────────────────────
+LIVE PREVIEW REFRESH
+────────────────────────────────────────────
+
+Preview refreshes automatically when:
+  - User adds a widget to the list
+  - User removes a widget
+  - User reorders widgets
+  - User switches slots
+
+Refresh: destroy existing widget instances in the card, recreate from current DB state.
+Use GLib.idle_add to defer recreation (avoid lag during rapid drag reorder).

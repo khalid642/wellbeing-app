@@ -1,0 +1,112 @@
+Phase 3 — Jamah Settings
+
+I have the prayer engine working. Now implement simple manual Jamah time settings.
+
+There is NO automatic jamah calculation. NO auto-offset. NO rounding system.
+NO sunrise-based calculation. Jamah is always set manually by the user per prayer.
+
+The jamah_times table already exists from Phase 1:
+  jamah_times(prayer TEXT PRIMARY KEY, time TEXT, enabled INTEGER DEFAULT 1)
+
+Create wellbeing_app/prayer/jamah.py — JamahStore class:
+
+  get_jamah_time(prayer: str) -> str | None
+    Returns 'HH:MM' string or None if not set.
+
+  set_jamah_time(prayer: str, time_str: str)
+    Validates HH:MM format with regex before saving.
+    Raise ValueError if format invalid.
+
+  clear_jamah_time(prayer: str)
+    Sets time to NULL in database.
+
+  get_all_jamah_times() -> dict
+    Returns { 'fajr': '07:30', 'dhuhr': None, ... } for all 5 prayers.
+
+  is_jamah_set(prayer: str) -> bool
+    Returns True if time is not NULL.
+
+  is_enabled(prayer: str) -> bool
+    Returns True if enabled = 1.
+
+  enable(prayer: str) / disable(prayer: str)
+    Sets enabled = 1 or 0.
+
+Iqamah:
+  Iqamah time = jamah_time - iqamah_config.global_offset_minutes (default 5).
+  This is computed by the daemon only. Never displayed in UI anywhere.
+  If jamah_times.time is NULL for a prayer: no iqamah triggers for that prayer.
+  JamahStore does NOT compute iqamah itself — it only provides jamah times.
+  The daemon reads JamahStore + iqamah_config and does the subtraction.
+
+Create wellbeing_app/gui/pages/jamah_settings.py — JamahSettingsPage:
+
+  Use Gtk.ScrolledWindow as outer container.
+  inner = Gtk.Box(orientation=VERTICAL, spacing=16, margin=24)
+
+  Group 1: AdwPreferencesGroup(title='Iqamah')
+    AdwActionRow(title='Iqamah Offset',
+                 subtitle='Minutes before Jamah that iqamah audio plays')
+      spin = Gtk.SpinButton.new_with_range(1, 30, 1)
+      spin.set_value(5)
+      spin.set_valign(Gtk.Align.CENTER)
+      row.add_suffix(spin)
+      On change: save to iqamah_config.global_offset_minutes
+
+    Gtk.Label below group:
+      label='Iqamah time is not shown in the app. It triggers the lock screen internally.'
+      css_classes=['caption', 'dim-label']
+      wrap=True, xalign=0, margin_start=12, margin_top=4
+
+  Group 2: AdwPreferencesGroup(title='Jamah Times')
+
+    For each prayer in ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha']:
+
+      row = AdwActionRow()
+      row.set_title(prayer_name)
+
+      time_entry = Gtk.Entry()
+      time_entry.set_placeholder_text('HH:MM')
+      time_entry.set_max_length(5)
+      time_entry.set_width_chars(6)
+      time_entry.set_valign(Gtk.Align.CENTER)
+
+      Load current value from JamahStore:
+        val = jamah_store.get_jamah_time(prayer_name.lower())
+        if val: time_entry.set_text(val)
+
+      time_entry.connect('changed', self._on_time_changed, prayer_name.lower())
+
+      clear_btn = Gtk.Button()
+      clear_btn.set_icon_name('edit-clear-symbolic')
+      clear_btn.add_css_class('flat')
+      clear_btn.set_valign(Gtk.Align.CENTER)
+      clear_btn.set_tooltip_text('Clear jamah time')
+      clear_btn.connect('clicked', self._on_clear, prayer_name.lower(), time_entry)
+
+      toggle = Gtk.Switch(valign=Gtk.Align.CENTER)
+      toggle.set_active(jamah_store.is_enabled(prayer_name.lower()))
+      toggle.connect('notify::active', self._on_enabled_changed, prayer_name.lower())
+
+      row.add_suffix(time_entry)
+      row.add_suffix(clear_btn)
+      row.add_suffix(toggle)
+      group.add(row)
+
+    Validation in _on_time_changed:
+      import re
+      pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')
+      if pattern.match(new_text):
+        entry.remove_css_class('error')
+        jamah_store.set_jamah_time(prayer, new_text)
+      else:
+        entry.add_css_class('error')
+
+    _on_clear:
+      jamah_store.clear_jamah_time(prayer)
+      entry.set_text('')
+      entry.remove_css_class('error')
+
+    _on_enabled_changed:
+      if active: jamah_store.enable(prayer)
+      else: jamah_store.disable(prayer)

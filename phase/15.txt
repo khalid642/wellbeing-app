@@ -1,0 +1,86 @@
+Phase 15 — Import/Export System
+
+Build the complete import/export system for widget packs, overlays, sequences, and full configuration.
+
+Create wellbeing_app/importer/__init__.py and wellbeing_app/exporter/__init__.py
+
+EXPORT SYSTEM (wellbeing_app/exporter/exporter.py):
+
+WellbeingExporter class:
+
+export_widget_template(template_id: int, output_dir: str) -> str:
+  Creates a .wbpkg file (it's a .zip, renamed)
+  Contents:
+    manifest.json: { type: "widget_template", version: "1.0", app_version: APP_VERSION, created_at: ..., name: ... }
+    widget.json: full widget_template row as JSON
+    assets/: copies of any referenced image or audio files (resolved from config_json file_path fields)
+
+export_widget_collection(template_ids: list[int], name: str, output_dir: str) -> str:
+  Same structure, type: "widget_collection", includes widgets/ directory with multiple widget JSONs
+
+export_overlay(overlay_id: int, output_dir: str) -> str:
+  Exports overlay + all its widgets + all referenced widget_templates
+  Includes all asset files
+
+export_zikr_sequence(sequence_id: int, output_dir: str) -> str:
+  Exports sequence + steps + all referenced widget_templates + assets
+
+export_theme(theme_id: int, output_dir: str) -> str:
+  Exports theme config + custom CSS + wallpaper if set
+
+export_full_config(output_dir: str) -> str:
+  Exports EVERYTHING: all config tables, all templates, all overlays, all sequences, all reminders, all themes, all assets
+  Creates a timestamped backup file
+
+IMPORT SYSTEM (wellbeing_app/importer/importer.py):
+
+WellbeingImporter class:
+
+validate_package(zip_path: str) -> ValidationResult:
+  Checks: zip opens, manifest.json exists, type is known, required fields present, asset files exist inside zip
+  Returns: { valid: bool, type: str, name: str, warnings: list[str], errors: list[str] }
+
+preview_package(zip_path: str) -> PreviewInfo:
+  Without importing, returns: type, name, description, widget_count, has_assets, estimated_size, thumbnail_if_any
+
+import_package(zip_path: str, conflict_strategy: str = 'rename') -> ImportResult:
+  conflict_strategy: 'rename' (append " (imported)"), 'overwrite', 'skip'
+  Extracts assets to ~/.config/wellbeing-app/assets/
+  Inserts database records
+  Resolves asset paths to new locations
+  Returns: { success: bool, imported_ids: dict, warnings: list[str] }
+
+Create wellbeing_app/gui/pages/import_export.py — ImportExportPage:
+
+Two tabs: Export | Import
+
+EXPORT TAB:
+  Sections with checkboxes:
+    Widget Templates (count badge)
+    Overlays (count badge)
+    Zikr Sequences (count badge)
+    Themes (count badge)
+    Full Configuration
+  For each section: expand to see list with individual checkboxes
+  Export Selected button → FileChooserDialog for output directory
+  Progress bar during export
+
+IMPORT TAB:
+  Large drop zone: "Drop .wbpkg file here or click to browse"
+  Drop zone uses Gtk.DropTarget for files
+  FileChooserButton as fallback
+  
+  After file selected/dropped:
+    Show preview card:
+      Package type icon
+      Name
+      Contents summary (e.g., "3 widget templates, 2 overlays, 5 assets")
+      Warnings if any (e.g., "Contains audio files (12 MB)")
+    Conflict strategy: DropDown (Rename / Overwrite / Skip duplicates)
+    Import button
+    Cancel button
+  
+  Import progress bar
+  Success/error notification after import
+
+Add to daemon: auto-backup of full config every 7 days to ~/.config/wellbeing-app/backups/

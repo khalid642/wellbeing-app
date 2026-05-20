@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Wellbeing App
+Comment=Islamic digital wellbeing environment
+Exec=wellbeing-app
+Icon=wellbeing-app
+Terminal=false
+Type=Application
+Categories=Utility;

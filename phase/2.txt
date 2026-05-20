@@ -1,0 +1,571 @@
+Phase 2 — Prayer Engine
+
+Build the prayer time calculation engine. Accuracy is the highest priority.
+Wrong prayer times are worse than no prayer times.
+
+────────────────────────────────────────────
+CRITICAL ACCURACY RULES — READ FIRST
+────────────────────────────────────────────
+
+1. FAJR MUST ALWAYS BE BEFORE SUNRISE.
+   After every calculation, run this sanity check:
+     assert fajr < sunrise, f"FATAL: Fajr {fajr} is after sunrise {sunrise}"
+   If this assertion fails: log CRITICAL error, do NOT return the result,
+   try the next calculation method as fallback.
+
+2. PRAYER ORDER MUST ALWAYS BE:
+   fajr < sunrise < dhuhr < asr < maghrib < isha
+   Validate this after every calculation. If order is violated: log and fallback.
+
+3. ASR HANAFI vs SHAFI ARE DIFFERENT CALCULATIONS.
+   Shafi/Maliki/Hanbali: shadow length = object height + shadow at noon
+   Hanafi: shadow length = 2 × object height + shadow at noon
+   Hanafi Asr is ALWAYS later than Shafi Asr (typically 30-90 min later).
+   If Hanafi Asr == Shafi Asr: your madhab setting is not being applied. Fix it.
+
+4. NEVER hardcode offsets to "fix" times.
+   If times look wrong: fix the calculation, not the output.
+
+5. ALL times must be timezone-aware datetime objects.
+   NEVER return naive datetime. NEVER return UTC without converting to local.
+
+6. Test with these known-correct reference values before shipping:
+   London (51.5074°N, 0.1278°W), 2025-06-15, MuslimWorldLeague, Shafi:
+     Fajr:    ~02:49
+     Sunrise: ~04:43
+     Dhuhr:   ~13:02
+     Asr:     ~17:08  (Shafi)
+     Maghrib: ~21:20
+     Isha:    ~23:12
+   
+   Same location, Hanafi:
+     Asr:     ~18:57  (Hanafi — nearly 2 hours later than Shafi)
+   
+   If your output differs by more than 3 minutes: the calculation is wrong.
+
+────────────────────────────────────────────
+DEPENDENCIES
+────────────────────────────────────────────
+
+Primary: adhanpy
+  pip install adhanpy
+
+Hijri conversion: hijri-converter
+  pip install hijri-converter
+
+Timezone: zoneinfo (Python 3.9+ stdlib, no install needed)
+  from zoneinfo import ZoneInfo
+
+DO NOT use pytz. Use zoneinfo only.
+DO NOT use arrow or pendulum — unnecessary dependencies.
+
+────────────────────────────────────────────
+FILE STRUCTURE
+────────────────────────────────────────────
+
+wellbeing_app/prayer/
+  __init__.py
+  engine.py          ← main PrayerEngine class
+  location.py        ← auto-detect location
+  validator.py       ← sanity checks on calculated times
+  hijri.py           ← Hijri date conversion
+
+────────────────────────────────────────────
+engine.py
+────────────────────────────────────────────
+
+from adhanpy.astronomy import (
+    PrayerTimes,
+    Coordinates,
+    CalculationMethod,
+    Madhab,
+    HighLatitudeRule,
+    PrayerAdjustments,
+)
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+import logging
+
+logger = logging.getLogger(__name__)
+
+CALCULATION_METHODS = {
+    'MuslimWorldLeague':  CalculationMethod.muslim_world_league(),
+    'Egyptian':           CalculationMethod.egyptian(),
+    'Karachi':            CalculationMethod.karachi(),
+    'UmmAlQura':          CalculationMethod.umm_al_qura(),
+    'Dubai':              CalculationMethod.dubai(),
+    'Kuwait':             CalculationMethod.kuwait(),
+    'Qatar':              CalculationMethod.qatar(),
+    'Singapore':          CalculationMethod.singapore(),
+    'Turkey':             CalculationMethod.turkey(),
+    'Tehran':             CalculationMethod.tehran(),
+    'NorthAmerica':       CalculationMethod.north_america(),
+    'France':             CalculationMethod.france(),
+    'Russia':             CalculationMethod.russia(),
+    'Moonsighting':       CalculationMethod.moon_sighting_committee(),
+}
+
+── adhanpy API note ────────────────────────
+adhanpy's PrayerTimes returns UTC datetime objects.
+You MUST convert every output time to local timezone:
+  local_time = utc_time.replace(tzinfo=ZoneInfo('UTC')).astimezone(local_tz)
+
+Check the actual adhanpy API by running:
+  python3 -c "import adhanpy; help(adhanpy)"
+before writing any code. Do not assume method names — verify them.
+If the actual API differs from what is shown here, use the real API.
+────────────────────────────────────────────
+
+class PrayerEngine:
+
+  def __init__(self, latitude: float, longitude: float, timezone: str,
+               calculation_method: str = 'MuslimWorldLeague',
+               madhab: str = 'shafi'):
+    
+    self.latitude = latitude
+    self.longitude = longitude
+    self.timezone_str = timezone
+    self.tz = ZoneInfo(timezone)
+    self.calculation_method_key = calculation_method
+    self.madhab_key = madhab.lower()
+    
+    self._validate_coordinates()
+    self._cached_schedule = {}      ← {date_str: schedule_dict}
+    self._cache_date = None
+
+  def _validate_coordinates(self):
+    if not (-90 <= self.latitude <= 90):
+      raise ValueError(f"Invalid latitude: {self.latitude}")
+    if not (-180 <= self.longitude <= 180):
+      raise ValueError(f"Invalid longitude: {self.longitude}")
+
+  def _get_params(self):
+    ── Build calculation parameters ──────────
+    
+    params = CALCULATION_METHODS.get(self.calculation_method_key)
+    if params is None:
+      logger.warning(f"Unknown method {self.calculation_method_key}, using MuslimWorldLeague")
+      params = CALCULATION_METHODS['MuslimWorldLeague']
+    
+    ── Set madhab EXPLICITLY ─────────────────
+    ── This is where most implementations go wrong.
+    ── Verify adhanpy's actual Madhab enum values:
+    ──   python3 -c "from adhanpy.astronomy import Madhab; print(list(Madhab))"
+    ── Use the actual enum values found, not assumed names.
+    
+    if self.madhab_key == 'hanafi':
+      params.madhab = Madhab.hanafi
+    else:
+      ── shafi, maliki, hanbali all use the same asr shadow factor ──
+      params.madhab = Madhab.shafi
+    
+    return params
+
+  def get_today_schedule(self, for_date: date = None) -> dict:
+    target_date = for_date or date.today()
+    cache_key = target_date.isoformat()
+    
+    if cache_key in self._cached_schedule:
+      return self._cached_schedule[cache_key]
+    
+    schedule = self._calculate(target_date)
+    
+    ── Validate before caching ───────────────
+    from wellbeing_app.prayer.validator import validate_schedule
+    errors = validate_schedule(schedule)
+    if errors:
+      for err in errors:
+        logger.critical(f"Prayer time validation failed: {err}")
+      ── Do not cache invalid results ─────────
+      ── Try fallback method ───────────────────
+      schedule = self._calculate_with_fallback(target_date)
+    
+    ── Only cache valid results ──────────────
+    self._cached_schedule[cache_key] = schedule
+    ── Clear cache for other dates ───────────
+    self._cached_schedule = {cache_key: schedule}
+    
+    return schedule
+
+  def _calculate(self, target_date: date) -> dict:
+    coords = Coordinates(self.latitude, self.longitude)
+    params = self._get_params()
+    
+    ── Construct PrayerTimes ─────────────────
+    ── adhanpy takes a date object and coordinates+params ──
+    ── Verify exact constructor signature from adhanpy docs ──
+    
+    prayer_times = PrayerTimes(
+      coordinates=coords,
+      date=target_date,
+      calculation_parameters=params,
+    )
+    
+    ── Extract times — adhanpy returns UTC datetime ──
+    ── Attribute names may vary — check with dir(prayer_times) ──
+    ── Common names: fajr, sunrise, dhuhr, asr, maghrib, isha ──
+    
+    def to_local(dt) -> datetime:
+      if dt is None:
+        return None
+      ── Ensure UTC tzinfo is set ──────────────
+      if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+      return dt.astimezone(self.tz)
+    
+    schedule = {
+      'fajr':    to_local(prayer_times.fajr),
+      'sunrise': to_local(prayer_times.sunrise),
+      'dhuhr':   to_local(prayer_times.dhuhr),
+      'asr':     to_local(prayer_times.asr),
+      'maghrib': to_local(prayer_times.maghrib),
+      'isha':    to_local(prayer_times.isha),
+    }
+    
+    return schedule
+
+  def _calculate_with_fallback(self, target_date: date) -> dict:
+    ── If primary method fails validation, try MWL as fallback ──
+    original_method = self.calculation_method_key
+    self.calculation_method_key = 'MuslimWorldLeague'
+    
+    try:
+      schedule = self._calculate(target_date)
+      logger.warning(f"Used fallback MuslimWorldLeague for {target_date}")
+      return schedule
+    finally:
+      self.calculation_method_key = original_method
+
+  def get_current_prayer(self, now: datetime = None) -> str:
+    now = now or datetime.now(self.tz)
+    schedule = self.get_today_schedule(now.date())
+    
+    ── Walk backwards through prayer order ───
+    ── Current prayer is the last one whose time has passed ──
+    order = ['isha', 'maghrib', 'asr', 'dhuhr', 'fajr']
+    
+    for prayer in order:
+      prayer_time = schedule.get(prayer)
+      if prayer_time and now >= prayer_time:
+        return prayer
+    
+    ── Before Fajr: current prayer is Isha from yesterday ──
+    return 'isha'
+
+  def get_next_prayer(self, now: datetime = None) -> tuple[str, datetime]:
+    now = now or datetime.now(self.tz)
+    schedule = self.get_today_schedule(now.date())
+    
+    prayer_order = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha']
+    
+    for prayer in prayer_order:
+      prayer_time = schedule.get(prayer)
+      if prayer_time and now < prayer_time:
+        return prayer, prayer_time
+    
+    ── All prayers passed today → next is Fajr tomorrow ──
+    tomorrow = now.date() + timedelta(days=1)
+    tomorrow_schedule = self.get_today_schedule(tomorrow)
+    return 'fajr', tomorrow_schedule['fajr']
+
+  def get_remaining_seconds(self, now: datetime = None) -> int:
+    now = now or datetime.now(self.tz)
+    _, next_time = self.get_next_prayer(now)
+    delta = next_time - now
+    return max(0, int(delta.total_seconds()))
+
+  def get_schedule_display(self, for_date: date = None) -> dict:
+    ── Returns times as formatted strings for UI display ──
+    schedule = self.get_today_schedule(for_date)
+    return {
+      prayer: dt.strftime('%H:%M') if dt else '—'
+      for prayer, dt in schedule.items()
+    }
+
+────────────────────────────────────────────
+validator.py
+────────────────────────────────────────────
+
+from datetime import datetime
+
+def validate_schedule(schedule: dict) -> list[str]:
+  errors = []
+  
+  fajr    = schedule.get('fajr')
+  sunrise = schedule.get('sunrise')
+  dhuhr   = schedule.get('dhuhr')
+  asr     = schedule.get('asr')
+  maghrib = schedule.get('maghrib')
+  isha    = schedule.get('isha')
+  
+  ── Check all times are present ───────────
+  for name, val in schedule.items():
+    if val is None:
+      errors.append(f"Missing prayer time: {name}")
+  
+  if errors:
+    return errors  ← can't do order checks without all times
+  
+  ── Check all times are timezone-aware ────
+  for name, val in schedule.items():
+    if val.tzinfo is None:
+      errors.append(f"{name} is timezone-naive — must be aware datetime")
+  
+  ── Critical order checks ─────────────────
+  if fajr >= sunrise:
+    errors.append(
+      f"CRITICAL: Fajr ({fajr.strftime('%H:%M')}) is not before "
+      f"sunrise ({sunrise.strftime('%H:%M')}). "
+      f"Difference: {int((fajr-sunrise).total_seconds()/60)} min"
+    )
+  
+  if sunrise >= dhuhr:
+    errors.append(f"Sunrise ({sunrise.strftime('%H:%M')}) >= Dhuhr ({dhuhr.strftime('%H:%M')})")
+  
+  if dhuhr >= asr:
+    errors.append(f"Dhuhr ({dhuhr.strftime('%H:%M')}) >= Asr ({asr.strftime('%H:%M')})")
+  
+  if asr >= maghrib:
+    errors.append(f"Asr ({asr.strftime('%H:%M')}) >= Maghrib ({maghrib.strftime('%H:%M')})")
+  
+  if maghrib >= isha:
+    errors.append(f"Maghrib ({maghrib.strftime('%H:%M')}) >= Isha ({isha.strftime('%H:%M')})")
+  
+  ── Sanity range checks ───────────────────
+  ── Fajr should be at least 30 min before sunrise ──
+  fajr_to_sunrise = (sunrise - fajr).total_seconds() / 60
+  if fajr_to_sunrise < 30:
+    errors.append(
+      f"WARNING: Fajr is only {fajr_to_sunrise:.0f} min before sunrise. "
+      f"This is unusually close — verify coordinates and calculation method."
+    )
+  
+  ── Dhuhr should be between 11:00 and 14:00 local time ──
+  if not (11 <= dhuhr.hour <= 14):
+    errors.append(
+      f"WARNING: Dhuhr at {dhuhr.strftime('%H:%M')} is outside expected "
+      f"range (11:00–14:00). Check timezone setting."
+    )
+  
+  return errors
+
+────────────────────────────────────────────
+hijri.py
+────────────────────────────────────────────
+
+from hijri_converter import Gregorian
+from datetime import date
+
+HIJRI_MONTHS = [
+  'Muharram', 'Safar', "Rabi' al-Awwal", "Rabi' al-Thani",
+  'Jumada al-Ula', 'Jumada al-Akhirah', 'Rajab', "Sha'ban",
+  'Ramadan', 'Shawwal', "Dhu al-Qi'dah", 'Dhu al-Hijjah'
+]
+
+def gregorian_to_hijri(greg_date: date) -> str:
+  hijri = Gregorian(greg_date.year, greg_date.month, greg_date.day).to_hijri()
+  month_name = HIJRI_MONTHS[hijri.month - 1]
+  return f"{hijri.day} {month_name} {hijri.year}"
+
+── Example output: "15 Rajab 1446" ──────────
+
+────────────────────────────────────────────
+location.py
+────────────────────────────────────────────
+
+import urllib.request
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+FALLBACK = (21.3891, 39.8579, 'Asia/Riyadh', 'Mecca')
+
+def auto_detect_location() -> tuple[float, float, str, str]:
+  ── Returns (latitude, longitude, timezone, city_name) ──
+  
+  try:
+    url = 'http://ip-api.com/json/?fields=lat,lon,timezone,city,status'
+    with urllib.request.urlopen(url, timeout=4) as resp:
+      data = json.loads(resp.read().decode())
+    
+    if data.get('status') != 'success':
+      raise ValueError(f"ip-api returned: {data.get('status')}")
+    
+    lat  = float(data['lat'])
+    lon  = float(data['lon'])
+    tz   = data['timezone']
+    city = data.get('city', 'Unknown')
+    
+    ── Validate returned data ────────────────
+    if not (-90 <= lat <= 90):
+      raise ValueError(f"Invalid lat from API: {lat}")
+    if not (-180 <= lon <= 180):
+      raise ValueError(f"Invalid lon from API: {lon}")
+    
+    ── Validate timezone string ──────────────
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+      ZoneInfo(tz)
+    except ZoneInfoNotFoundError:
+      raise ValueError(f"Unknown timezone from API: {tz}")
+    
+    logger.info(f"Detected location: {city} ({lat}, {lon}) {tz}")
+    return lat, lon, tz, city
+  
+  except Exception as e:
+    logger.warning(f"Location detection failed: {e}. Using fallback (Mecca).")
+    return FALLBACK
+
+────────────────────────────────────────────
+VERIFICATION SCRIPT
+────────────────────────────────────────────
+
+Create tests/test_prayer_accuracy.py
+
+Run this after implementing. ALL assertions must pass.
+
+from wellbeing_app.prayer.engine import PrayerEngine
+from wellbeing_app.prayer.validator import validate_schedule
+from datetime import date
+
+def test_london_shafi():
+  engine = PrayerEngine(
+    latitude=51.5074,
+    longitude=-0.1278,
+    timezone='Europe/London',
+    calculation_method='MuslimWorldLeague',
+    madhab='shafi'
+  )
+  target = date(2025, 6, 15)
+  schedule = engine.get_today_schedule(target)
+  display = engine.get_schedule_display(target)
+  
+  print("London Shafi 2025-06-15:")
+  for name, t in display.items():
+    print(f"  {name:8}: {t}")
+  
+  errors = validate_schedule(schedule)
+  assert not errors, f"Validation failed: {errors}"
+  
+  ── Check Fajr is before Sunrise ──────────
+  assert schedule['fajr'] < schedule['sunrise'], \
+    f"FAIL: Fajr {display['fajr']} >= Sunrise {display['sunrise']}"
+  
+  ── Check approximate expected times ──────
+  ── Allow ±5 minute tolerance for library differences ──
+  fajr_hour = schedule['fajr'].hour
+  fajr_min  = schedule['fajr'].minute
+  assert fajr_hour == 2 and 44 <= fajr_min <= 54, \
+    f"FAIL: Fajr should be ~02:49, got {display['fajr']}"
+  
+  sunrise_hour = schedule['sunrise'].hour
+  assert sunrise_hour == 4, \
+    f"FAIL: Sunrise should be ~04:43, got {display['sunrise']}"
+  
+  print("  ✓ Fajr before sunrise")
+  print("  ✓ All times in correct order")
+
+def test_hanafi_asr_later_than_shafi():
+  shafi_engine = PrayerEngine(
+    latitude=51.5074, longitude=-0.1278,
+    timezone='Europe/London',
+    calculation_method='MuslimWorldLeague',
+    madhab='shafi'
+  )
+  hanafi_engine = PrayerEngine(
+    latitude=51.5074, longitude=-0.1278,
+    timezone='Europe/London',
+    calculation_method='MuslimWorldLeague',
+    madhab='hanafi'
+  )
+  
+  target = date(2025, 6, 15)
+  shafi_schedule  = shafi_engine.get_today_schedule(target)
+  hanafi_schedule = hanafi_engine.get_today_schedule(target)
+  
+  shafi_asr  = shafi_schedule['asr']
+  hanafi_asr = hanafi_schedule['asr']
+  
+  diff_minutes = (hanafi_asr - shafi_asr).total_seconds() / 60
+  
+  print(f"\nAsr comparison for London 2025-06-15:")
+  print(f"  Shafi Asr:  {shafi_asr.strftime('%H:%M')}")
+  print(f"  Hanafi Asr: {hanafi_asr.strftime('%H:%M')}")
+  print(f"  Difference: {diff_minutes:.0f} minutes")
+  
+  assert hanafi_asr > shafi_asr, \
+    f"FAIL: Hanafi Asr ({hanafi_asr.strftime('%H:%M')}) should be " \
+    f"LATER than Shafi Asr ({shafi_asr.strftime('%H:%M')})"
+  
+  assert diff_minutes >= 30, \
+    f"FAIL: Hanafi/Shafi difference is only {diff_minutes:.0f} min. " \
+    f"Expected at least 30 min. Madhab setting is not working."
+  
+  print(f"  ✓ Hanafi Asr is {diff_minutes:.0f} min later than Shafi")
+
+def test_mecca():
+  engine = PrayerEngine(
+    latitude=21.3891,
+    longitude=39.8579,
+    timezone='Asia/Riyadh',
+    calculation_method='UmmAlQura',
+    madhab='shafi'
+  )
+  schedule = engine.get_today_schedule(date.today())
+  errors = validate_schedule(schedule)
+  
+  print(f"\nMecca today:")
+  for name, t in engine.get_schedule_display().items():
+    print(f"  {name:8}: {t}")
+  
+  assert not errors, f"Validation failed: {errors}"
+  print("  ✓ All times valid")
+
+def test_hijri():
+  from wellbeing_app.prayer.hijri import gregorian_to_hijri
+  result = gregorian_to_hijri(date(2025, 1, 15))
+  print(f"\nHijri test: 2025-01-15 = {result}")
+  assert 'Rajab' in result or 'Jumada' in result, \
+    f"FAIL: Unexpected Hijri month in '{result}'"
+  assert '1446' in result, \
+    f"FAIL: Expected year 1446, got '{result}'"
+  print("  ✓ Hijri conversion correct")
+
+if __name__ == '__main__':
+  test_london_shafi()
+  test_hanafi_asr_later_than_shafi()
+  test_mecca()
+  test_hijri()
+  print("\n✓ All prayer accuracy tests passed")
+
+────────────────────────────────────────────
+IMPORTANT: adhanpy API VERIFICATION STEP
+────────────────────────────────────────────
+
+Before writing engine.py, run these commands and use the 
+ACTUAL output to write the code:
+
+  python3 -c "
+  import adhanpy
+  from adhanpy.astronomy import PrayerTimes, Coordinates, CalculationMethod, Madhab
+  from datetime import date
+
+  coords = Coordinates(51.5074, -0.1278)
+  params = CalculationMethod.muslim_world_league()
+  print('Madhab values:', list(Madhab))
+  print('Params madhab attr:', params.madhab)
+  params.madhab = Madhab.hanafi
+  pt = PrayerTimes(coordinates=coords, date=date(2025,6,15),
+                   calculation_parameters=params)
+  print('Attributes:', [a for a in dir(pt) if not a.startswith('_')])
+  print('Fajr:', pt.fajr)
+  print('Fajr tzinfo:', pt.fajr.tzinfo)
+  "
+
+The output of this command tells you:
+  - Exact Madhab enum member names
+  - Exact PrayerTimes attribute names
+  - Whether times come out as UTC or naive
+  
+Use those exact names in engine.py. Do not guess.
