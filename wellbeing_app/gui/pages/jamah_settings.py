@@ -9,7 +9,7 @@ class JamahSettingsPage(Gtk.ScrolledWindow):
   def __init__(self):
     super().__init__()
     self.set_propagate_natural_width(True)
-    self.set_propagate_natural_height(True)
+    self.set_propagate_natural_height(False)
     
     self.jamah_store = JamahStore()
     self._time_pattern = re.compile(r'^([01]\d|2[0-3]):([0-5]\d)$')

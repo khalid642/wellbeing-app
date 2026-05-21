@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS adhan_config (
   id INTEGER PRIMARY KEY,
   prayer TEXT,
   audio_file TEXT,
+  audio_file_list TEXT,
+  random_selection INTEGER DEFAULT 0,
   delay_seconds INTEGER DEFAULT 0,
   volume REAL DEFAULT 0.8,
   enabled INTEGER DEFAULT 1
@@ -65,4 +67,12 @@ CREATE TABLE IF NOT EXISTS themes (
   name TEXT,
   is_active INTEGER DEFAULT 0,
   config_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS overlay_widget_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  overlay_slot TEXT NOT NULL,
+  widget_template_id INTEGER REFERENCES widget_templates(id),
+  display_order INTEGER DEFAULT 0,
+  enabled INTEGER DEFAULT 1
 );

@@ -1,0 +1,803 @@
+Phase 8 — Dashboard & Main Window GUI (QML / Qt Quick Edition)
+
+Build the main application window and dashboard using QML and Qt Quick. This must 
+look like a modern, polished desktop application following native design patterns. 
+Follow every instruction exactly — do not guess icon names, do not use legacy 
+Qt Quick Controls 1 patterns, and ensure strict type safety for properties.
+
+────────────────────────────────────────────
+CRITICAL QML RULES — READ BEFORE WRITING CODE
+────────────────────────────────────────────
+
+1. NEVER use absolute positioning (x, y) or hardcoded element sizing for responsive 
+   layouts. Use Layout-based attached properties (Layout.fillWidth: true, 
+   Layout.fillHeight: true, Layout.preferredWidth) inside RowLayout and ColumnLayout.
+   Reserve anchors ONLY for items inside a plain Item, Rectangle, or Page.
+
+2. NEVER use legacy Qt Quick Controls 1 modules. Use ONLY:
+   import QtQuick
+   import QtQuick.Controls
+   import QtQuick.Layouts
+   (And optionally import org.kde.kirigami if targeting a Kirigami desktop look).
+
+3. NEVER use JavaScript logic blocks inside bindings to push data downstream. Use 
+   declarative property bindings so that UI components automatically update when 
+   the underlying C++ or PySide/PyQt context properties change.
+
+4. NEVER guess Freedesktop/KDE/Qt icon names. Use ONLY these verified cross-platform 
+   system icon names available in standard themes:
+   "go-next"
+   "go-previous"
+   "list-add"
+   "edit-delete"
+   "emblem-success-symbolic" or "dialog-ok"
+   "dialog-warning"
+   "audio-volume-high"
+   "configure"
+   "view-refresh"
+   "weather-clear"
+   "document-save"
+   "document-open"
+   "media-playback-start"
+   "media-playback-stop"
+   "preferences-system"
+   "system-shutdown"
+   "help-about"
+   "open-menu"
+   "go-down"
+   "go-right"
+   "edit-clear"
+
+   For missing concepts, use a plain Rectangle with a subtle color as a placeholder.
+
+5. NEVER use complex inline multi-line JavaScript inside signals. Move complex logic 
+   to the Python/C++ backend wrapper or separate helper JS functions.
+
+6. For styling and customization, define an application-wide palette or use the built-in 
+   Qt Quick Controls 2 styling configuration (e.g., Material, Fusion, or Breeze). Pass custom 
+   CSS-like visual adjustments via custom QML components or graphical Item properties.
+
+────────────────────────────────────────────
+MAIN WINDOW
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/main_window.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+ApplicationWindow {
+    id: mainWindow
+    visible: true
+    width: 1100
+    height: 720
+    title: qsTr("Wellbeing App")
+
+    // Background styling matching desktop themes
+    background: Rectangle {
+        color: Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#1e1e2e" : "#f8f9fa"
+    }
+
+    // Main layout splits into Sidebar and Content Area
+    RowLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        // ── Sidebar Component ──
+        Sidebar {
+            id: sidebar
+            Layout.fillHeight: true
+            Layout.preferredWidth: 240
+            onNavItemSelected: (index) => {
+                contentStack.currentIndex = index
+            }
+        }
+
+        // Native thin vertical separator line
+        Rectangle {
+            Layout.fillHeight: true
+            Layout.preferredWidth: 1
+            color: Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#313244" : "#e0e0e0"
+        }
+
+        // ── Main Content Area ──
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+
+            // Header/Toolbar region
+            ToolBar {
+                Layout.fillWidth: true
+                
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+
+                    ColumnLayout {
+                        spacing: 2
+                        Label {
+                            text: qsTr("Wellbeing App")
+                            font.bold: true
+                            font.pixelSize: 16
+                        }
+                        Label {
+                            // Automatically updates from Python backend property
+                            text: prayerEngineContext.nextPrayerSubtitle 
+                            font.pixelSize: 11
+                            opacity: 0.7
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true } // Spacer
+
+                    ToolButton {
+                        icon.name: "open-menu"
+                        onClicked: menuPopup.open()
+                    }
+                }
+            }
+
+            // Stack layout handling the pages
+            StackLayout {
+                id: contentStack
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: 0 // Default to Dashboard
+
+                DashboardPage {}
+                PrayerSettingsPage {}
+                AdhanSettingsPage {}
+                JamahSettingsPage {}
+                
+                // Placeholders for remaining items
+                PlaceholderPage { pageName: "Zikr" }
+                PlaceholderPage { pageName: "Overlays" }
+                PlaceholderPage { pageName: "Widgets" }
+                PlaceholderPage { pageName: "Reminders" }
+                PlaceholderPage { pageName: "Theme" }
+                PlaceholderPage { pageName: "Audio" }
+                PlaceholderPage { pageName: "Import/Export" }
+                PlaceholderPage { pageName: "Plugins" }
+                PlaceholderPage { pageName: "Logs" }
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────
+SIDEBAR COMPONENT
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/Sidebar.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Item {
+    id: sidebarRoot
+    signal navItemSelected(int index)
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 12
+        anchors.margins: 8
+
+        // Top App Identity Box
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.margins: 12
+            spacing: 2
+            
+            Label {
+                text: qsTr("Wellbeing")
+                font.pixelSize: 22
+                font.bold: true
+            }
+            Label {
+                text: qsTr("Islamic Focus App")
+                font.pixelSize: 12
+                opacity: 0.6
+            }
+        }
+
+        // Navigation Menu List using a structural Data Model
+        ListView {
+            id: navListView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            currentIndex: 0
+
+            model: ListModel {
+                ListElement { icon: "weather-clear"; label: "Dashboard" }
+                ListElement { icon: "preferences-system"; label: "Prayer" }
+                ListElement { icon: "audio-volume-high"; label: "Adhan" }
+                ListElement { icon: "list-add"; label: "Jamah" }
+                ListElement { icon: "view-refresh"; label: "Zikr" }
+                ListElement { icon: "list-add"; label: "Overlays" }
+                ListElement { icon: "configure"; label: "Widgets" }
+                ListElement { icon: "document-save"; label: "Reminders" }
+                ListElement { icon: "media-playback-start"; label: "Theme" }
+                ListElement { icon: "document-open"; label: "Audio" }
+                ListElement { icon: "help-about"; label: "Import/Export" }
+                ListElement { icon: "open-menu"; label: "Plugins" }
+                ListElement { icon: "dialog-ok"; label: "Logs" }
+            }
+
+            delegate: ItemDelegate {
+                width: navListView.width
+                highlighted: ListView.isCurrentItem
+                
+                contentItem: RowLayout {
+                    spacing: 12
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+
+                    IconImage {
+                        source: model.icon
+                        Layout.preferredWidth: 20
+                        Layout.preferredHeight: 20
+                        opacity: highlighted ? 1.0 : 0.7
+                    }
+                    Label {
+                        text: model.label
+                        Layout.fillWidth: true
+                        font.bold: highlighted
+                    }
+                }
+                onClicked: {
+                    navListView.currentIndex = index
+                    sidebarRoot.navItemSelected(index)
+                }
+            }
+        }
+
+        // Bottom Status Box
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.margins: 8
+            spacing: 8
+
+            Rectangle {
+                width: 8
+                height: 8
+                radius: 4
+                // Colors track state exported cleanly by the Python daemon controller
+                color: daemonContext.isRunning ? "#2ecc71" : "#e74c3c"
+            }
+            Label {
+                text: daemonContext.isRunning ? qsTr("Daemon running") : qsTr("Daemon stopped")
+                font.pixelSize: 11
+                opacity: 0.7
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────
+DASHBOARD PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/DashboardPage.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+ScrollView {
+    id: dashboardScroll
+    contentWidth: availableWidth
+    clip: true
+
+    ColumnLayout {
+        width: parent.width
+        spacing: 24
+        anchors.margins: 24
+
+        // ── Section 1: Date Header ──
+        RowLayout {
+            Layout.fillWidth: true
+
+            ColumnLayout {
+                spacing: 2
+                Label {
+                    text: prayerEngineContext.gregorianDateText
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+                Label {
+                    text: prayerEngineContext.hijriDateText
+                    font.pixelSize: 14
+                    opacity: 0.6
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                text: prayerEngineContext.locationText
+                font.pixelSize: 14
+                opacity: 0.6
+            }
+        }
+
+        // ── Section 2: Next Prayer Countdown Card ──
+        Frame {
+            Layout.fillWidth: true
+            background: Rectangle {
+                color: Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#2d2d3d" : "#ffffff"
+                border.color: "transparent"
+                radius: 12
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 6
+
+                Label {
+                    text: qsTr("NEXT PRAYER")
+                    font.pixelSize: 11
+                    font.bold: true
+                    opacity: 0.5
+                }
+                Label {
+                    text: prayerEngineContext.nextPrayerName.toUpperCase()
+                    font.pixelSize: 24
+                    font.bold: true
+                }
+                Label {
+                    text: prayerEngineContext.countdownText
+                    font.pixelSize: 36
+                    font.family: "Monospace"
+                    font.bold: true
+                }
+                Label {
+                    text: qsTr("at %1").arg(prayerEngineContext.nextPrayerTimeText)
+                    font.pixelSize: 13
+                    opacity: 0.6
+                }
+            }
+        }
+
+        // ── Section 3: Prayer Times Grid ──
+        Label {
+            text: qsTr("Today's Prayers")
+            font.pixelSize: 16
+            font.bold: true
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            // Instantiates cards cleanly for all 5 daily prayers
+            Repeater {
+                model: ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]
+                
+                delegate: Frame {
+                    Layout.fillWidth: true
+                    // Query specific property dicts exported by engine matching active statuses
+                    property var dataBlock: prayerEngineContext.prayerDataMap[modelData.toLowerCase()]
+
+                    background: Rectangle {
+                        color: dataBlock.status === "current" ? 
+                               (Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#1e293b" : "#e0f2fe") : 
+                               (Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#2d2d3d" : "#ffffff")
+                        radius: 8
+                        border.width: dataBlock.status === "current" ? 2 : 0
+                        border.color: palette.accent
+                    }
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 8
+
+                        Label {
+                            text: modelData
+                            font.bold: true
+                            font.pixelSize: 14
+                        }
+                        Label {
+                            text: dataBlock.time
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+                        RowLayout {
+                            spacing: 4
+                            Label { text: qsTr("Jamah "); font.pixelSize: 11; opacity: 0.5 }
+                            Label { text: dataBlock.jamah; font.pixelSize: 11 }
+                        }
+                        
+                        RowLayout {
+                            spacing: 4
+                            visible: dataBlock.status !== "upcoming" && dataBlock.status !== "passed"
+                            Rectangle {
+                                width: 6; height: 6; radius: 3
+                                color: dataBlock.status === "current" ? "#2ecc71" : "#f1c40f"
+                            }
+                            Label {
+                                text: dataBlock.status === "current" ? qsTr("Now") : qsTr("Next")
+                                font.pixelSize: 11
+                                font.bold: true
+                            }
+                        }
+                        Label {
+                            text: dataBlock.status === "passed" ? qsTr("Passed") : qsTr("Upcoming")
+                            font.pixelSize: 11
+                            opacity: 0.5
+                            visible: dataBlock.status === "upcoming" || dataBlock.status === "passed"
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Section 4: Sunrise Information Row ──
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            IconImage {
+                source: "weather-clear"
+                Layout.preferredWidth: 18
+                Layout.preferredHeight: 18
+            }
+            Label {
+                text: qsTr("Sunrise")
+                font.pixelSize: 14
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                text: prayerEngineContext.sunriseTimeText
+                font.pixelSize: 14
+                opacity: 0.6
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────
+PRAYER SETTINGS PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/PrayerSettingsPage.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+ScrollView {
+    contentWidth: availableWidth
+    clip: true
+
+    ColumnLayout {
+        width: parent.width
+        spacing: 20
+        anchors.margins: 24
+
+        // Group 1: Location Preferences
+        Label { text: qsTr("Location"); font.bold: true; font.pixelSize: 16 }
+
+        Frame {
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Location Mode"); Layout.preferredWidth: 150 }
+                    ComboBox {
+                        id: locModeCombo
+                        Layout.fillWidth: true
+                        model: ["Manual", "Auto-detect"]
+                        currentIndex: prayerConfigContext.mode === "Manual" ? 0 : 1
+                        onActivated: (index) => { prayerConfigContext.setLocationMode(index) }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Latitude"); Layout.preferredWidth: 150 }
+                    TextField {
+                        text: prayerConfigContext.latitude
+                        Layout.fillWidth: true
+                        enabled: locModeCombo.currentIndex === 0
+                        onEditingFinished: prayerConfigContext.latitude = text
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Longitude"); Layout.preferredWidth: 150 }
+                    TextField {
+                        text: prayerConfigContext.longitude
+                        Layout.fillWidth: true
+                        enabled: locModeCombo.currentIndex === 0
+                        onEditingFinished: prayerConfigContext.longitude = text
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Timezone"); Layout.preferredWidth: 150 }
+                    TextField {
+                        text: prayerConfigContext.timezone
+                        Layout.fillWidth: true
+                        enabled: locModeCombo.currentIndex === 0
+                        onEditingFinished: prayerConfigContext.timezone = text
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: locModeCombo.currentIndex === 1
+                    ColumnLayout {
+                        Label { text: qsTr("Detect Location Now"); font.bold: true }
+                        Label { text: qsTr("Uses IP geolocation"); font.pixelSize: 11; opacity: 0.6 }
+                    }
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: qsTr("Detect")
+                        onClicked: prayerConfigContext.triggerAutoDetection()
+                    }
+                }
+            }
+        }
+
+        // Group 2: Calculation Matrix
+        Label { text: qsTr("Calculation"); font.bold: true; font.pixelSize: 16 }
+
+        Frame {
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Calculation Method"); Layout.preferredWidth: 150 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: ["Muslim World League", "Egyptian", "Karachi", "Umm Al-Qura", "Dubai", "Kuwait", "Singapore", "Turkey", "Tehran", "North America", "France"]
+                        currentIndex: prayerConfigContext.calcMethodIndex
+                        onActivated: (index) => { prayerConfigContext.calcMethodIndex = index }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("Madhab"); Layout.preferredWidth: 150 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: ["Shafi / Maliki / Hanbali", "Hanafi"]
+                        currentIndex: prayerConfigContext.madhabIndex
+                        onActivated: (index) => { prayerConfigContext.madhabIndex = index }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: qsTr("High Latitude Rule"); Layout.preferredWidth: 150 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: ["Middle of Night", "Seventh of Night", "Angle Based", "None"]
+                        currentIndex: prayerConfigContext.highLatRuleIndex
+                        onActivated: (index) => { prayerConfigContext.highLatRuleIndex = index }
+                    }
+                }
+            }
+        }
+
+        Button {
+            text: qsTr("Save and Recalculate")
+            highlighted: true
+            Layout.alignment: Qt.AlignRight
+            onClicked: {
+                prayerConfigContext.saveAndRecalculate()
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────
+ADHAN SETTINGS PAGE
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/AdhanSettingsPage.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtDialogs
+
+ScrollView {
+    contentWidth: availableWidth
+    clip: true
+
+    ColumnLayout {
+        width: parent.width
+        spacing: 12
+        anchors.margins: 24
+
+        FileDialog {
+            id: adhanFileDialog
+            title: qsTr("Select Adhan Audio")
+            currentFolder: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+            nameFilters: [ qsTr("Audio Files (*.mp3 *.ogg *.wav)") ]
+            
+            property string targetPrayer: ""
+            onAccepted: {
+                adhanConfigContext.saveAudioPath(targetPrayer, selectedFile)
+            }
+        }
+
+        Repeater {
+            model: ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]
+
+            delegate: ExpansionPanel {
+                id: panel
+                Layout.fillWidth: true
+                title: modelData
+                
+                // Content lazy matches open expansions inside panels dynamically
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 12
+                    topPadding: 8
+                    bottomPadding: 8
+
+                    // 1. Enable Toggle
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Enable Adhan"); Layout.fillWidth: true }
+                        Switch {
+                            checked: adhanConfigContext.getIsChecked(modelData.toLowerCase())
+                            onCheckedChanged: adhanConfigContext.setIsChecked(modelData.toLowerCase(), checked)
+                        }
+                    }
+
+                    // 2. Delay Offset Tracker
+                    RowLayout {
+                        Layout.fillWidth: true
+                        ColumnLayout {
+                            Label { text: qsTr("Delay") }
+                            Label { text: qsTr("Minutes after prayer time"); font.pixelSize: 11; opacity: 0.6 }
+                        }
+                        Item { Layout.fillWidth: true }
+                        SpinBox {
+                            from: 0; to: 60
+                            value: adhanConfigContext.getDelay(modelData.toLowerCase())
+                            onValueModified: adhanConfigContext.setDelay(modelData.toLowerCase(), value)
+                        }
+                    }
+
+                    // 3. Audio Asset Picker
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Audio File"); Layout.preferredWidth: 120 }
+                        Label {
+                            text: adhanConfigContext.getAudioName(modelData.toLowerCase())
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                            opacity: 0.6
+                        }
+                        Button {
+                            text: qsTr("Browse")
+                            onClicked: {
+                                adhanFileDialog.targetPrayer = modelData.toLowerCase()
+                                adhanFileDialog.open()
+                            }
+                        }
+                    }
+
+                    // 4. Volume Slider Frame
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Volume"); Layout.preferredWidth: 120 }
+                        Slider {
+                            from: 0; to: 100
+                            value: adhanConfigContext.getVolume(modelData.toLowerCase())
+                            Layout.fillWidth: true
+                            onMoved: adhanConfigContext.setVolume(modelData.toLowerCase(), value)
+                        }
+                    }
+
+                    // 5. Native Output Playback Diagnostics
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Test Adhan"); Layout.fillWidth: true }
+                        Button {
+                            text: qsTr("Play Now")
+                            onClicked: adhanConfigContext.playTestAudio(modelData.toLowerCase())
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+────────────────────────────────────────────
+PLACEHOLDER COMPONENT (FALLBACK)
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/PlaceholderPage.qml
+
+import QtQuick
+import QtQuick.Controls
+
+Item {
+    id: placeholderRoot
+    property string pageName: ""
+
+    Label {
+        anchors.centerIn: parent
+        text: qsTr("%1 — coming in a later phase").arg(pageName)
+        font.pixelSize: 16
+        opacity: 0.5
+    }
+}
+
+────────────────────────────────────────────
+STYLING & COMPONENT BASICS
+────────────────────────────────────────────
+
+File: wellbeing_app/gui/pages/ExpansionPanel.qml
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Frame {
+    id: panelRoot
+    property string title: ""
+    property alias expanded: contentContainer.visible
+    default property alias panelContent: contentContainer.data
+
+    background: Rectangle {
+        color: Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#2d2d3d" : "#ffffff"
+        radius: 6
+        border.color: Qt.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#3f3f56" : "#e0e0e0"
+        border.width: 1
+    }
+
+    ColumnLayout {
+        width: parent.width
+        spacing: 0
+
+        ItemDelegate {
+            Layout.fillWidth: true
+            onClicked: panelRoot.expanded = !panelRoot.expanded
+
+            contentItem: RowLayout {
+                anchors.fill: parent
+                Label {
+                    text: panelRoot.title
+                    font.bold: true
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                IconImage {
+                    source: panelRoot.expanded ? "go-down" : "go-right"
+                    Layout.preferredWidth: 16
+                    Layout.preferredHeight: 16
+                }
+            }
+        }
+
+        Item {
+            id: contentContainer
+            Layout.fillWidth: true
+            visible: false
+            // Automatic structural dynamic sizing container hook
+            implicitHeight: childrenRect.height
+        }
+    }
+}
